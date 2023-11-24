@@ -16,24 +16,7 @@ import sklearn
 import pandas as pd
 import cv2
 from scipy.signal import butter, sosfilt, sosfreqz
-from sklearn import datasets, linear_model
 from scipy import stats
-
-from utils.wheel import wheel
-from utils.calcium import calcium
-#from utils.animal_database import animal_database
-
-from sklearn import metrics
-from sklearn import datasets, linear_model
-from sklearn.metrics import mean_squared_error, r2_score
-
-
-import sys
-module_path = os.path.abspath(os.path.join('..'))
-sys.path.append(module_path)
-
-from utils.wheel import wheel
-
 
 #
 def butter_highpass(cutoff, fs, order=5):

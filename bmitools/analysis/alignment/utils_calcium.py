@@ -62,6 +62,23 @@ class ProcessCalcium():
         except:
             print ("Could not find shifts in yaml file ... ")
 
+
+        # load session types from each session yaml file
+        self.session_types = []
+        for session_id in self.session_ids:
+            fname = os.path.join(self.root_dir,
+                                self.animal_id,
+                                session_id,
+                                session_id+'.yaml')
+            
+            # load yaml file
+            import yaml
+            with open(fname) as file:
+                doc = yaml.load(file, Loader=yaml.FullLoader)
+
+            #
+            self.session_types.append(doc['session_type'])
+
         #
         self.verbose = True
 
@@ -69,24 +86,30 @@ class ProcessCalcium():
     def load_day0_mask(self):
 
     
+        # fname = os.path.join(
+        #                 self.root_dir,
+        #                 self.animal_id,
+        #                 'day0',
+        #                 'rois_pixels_and_thresholds_day0.npz')
+
+        # find session id with day0 session_type
+
+        # find the session type that has 'day0' in it
+        idx = np.where(np.array(self.session_types)=='day0')[0]
+
         fname = os.path.join(
                         self.root_dir,
                         self.animal_id,
-                        'day0',
+                        self.session_ids[idx[0]],                        
                         'rois_pixels_and_thresholds_day0.npz')
-
+        
         #
         try:
             data = np.load(fname, allow_pickle=True)
         except:
-            print ("Could not Day0 masks ... trying day1 ")
-            fname = os.path.join(
-                                self.root_dir,
-                                self.animal_id,
-                                self.session_ids[1],
-                                'rois_pixels_and_thresholds.npz')
-
-            data = np.load(fname, allow_pickle=True)
+            print ("Could not Day0 masks ... ")
+            return
+           
         #
         contours_all_cells = data['contours_all_cells']
         self.cell_ids = data['cell_ids']
@@ -3471,64 +3494,58 @@ class ProcessCalcium():
                               theta =0,
                               theta_x = 256,
                               theta_y = 256,
+                              scale_factor = 1
                               ):
 
+        # replotting 
         session_contours = self.sessions[self.session_id].contours
 
-        # pr
-        #print ("# of cells: ", len(session_contours))
+        if clr=='red':
+            idxs = self.day_cell_idx
+        else:
+            idxs = self.cell_idxs
 
-        for k in range(len(session_contours)):
-            temp2 = session_contours[k]
-            #print ("temp2: ", temp2.shape)
+        for k in idxs:
+            temp2 = session_contours[k].copy()
             temp= temp2.copy()
+
+            # rescale all contours by this factor but from self.scale_x and self.scale_y as centre
+            #temp3
+            temp2[:,0] = (temp2[:,0] - self.scale_x)*scale_factor + self.scale_x
+            temp2[:,1] = (temp2[:,1] - self.scale_y)*scale_factor + self.scale_y
+
+            # shift cells
             temp[:,0] = temp2[:,1]+x_shift
             temp[:,1] = temp2[:,0]+y_shift
-
-            # rotate the contours by x degrees
-            #def rotate_contours(temp, theta):
-            #    # rotate the contours by x degrees
-            #    theta = np.deg2rad(theta)
-            #    R = np.array([[np.cos(theta), -np.sin(theta)],
-            #                [np.sin(theta),  np.cos(theta)]])
-            #    temp = np.dot(temp, R)
-            #    return temp
-            
-            def rotate_points(points, cx, cy, theta):
-                # Convert the angle to radians
-                theta = np.radians(theta)
-                
-                # Create a rotation matrix
-                rotation_matrix = np.array([
-                    [np.cos(theta), -np.sin(theta)],
-                    [np.sin(theta), np.cos(theta)]
-                ])
-                
-                # Create a matrix of points
-                points_matrix = np.column_stack((points[:, 0] - cx, points[:, 1] - cy))
-                
-                # Apply the rotation matrix to the points
-                rotated_points_matrix = np.dot(points_matrix, rotation_matrix.T)
-                
-                # Translate the points back to the original coordinate system
-                rotated_points = rotated_points_matrix + np.array([cx, cy])
-                
-                return rotated_points
-            
-            #
-            #temp = rotate_contours(temp, theta)
-
+         
             #
             temp = rotate_points(temp, theta_x, theta_y, theta)
 
             #
             self.ax.plot(temp[:,0],
-                    temp[:,1],
-                    c=clr,
-                    alpha=.5,
-                    linewidth=2,
-                    #label="ROI: "+str(k)
-                    )
+                        temp[:,1],
+                        c=clr,
+                        alpha=.5,
+                        linewidth=2,
+                        label="session: "+str(self.session_id) if k==0 else ""
+                        )
+            
+
+
+    #
+    def plot_quadrants(self):
+
+        self.ax.plot([0,512],
+                     [self.theta_x,self.theta_x],
+                     c='black',
+                     linestyle='--')
+        
+        # same for y vertical line
+        self.ax.plot([self.theta_y,self.theta_y],
+                        [0,512],
+                        c='black',
+                        linestyle='--')
+
     
     #
     def plot_ROIs_contours(self):
@@ -4038,159 +4055,104 @@ def interpolate_time_warp(ts1, ts2, warp_function):
 # Define a function to handle the button click event
 def x_right_shift(event, c):
 
-    # clear c.ax completely
-    c.ax.clear()
-
     #
     c.x_shift+=1
-    #print ("x_shift: ", c.x_shift)
 
     #
-    c.session_id = c.session_selected
-    clr= 'blue'
-    c.plot_session_contours(clr, c.x_shift, c.y_shift, c.theta,
-                             c.theta_x, c.theta_y)
+    c.alignment_logger.append(['x_shift', 1])
 
     #
-    c.session_id = 0
-    clr= 'red'
-    c.plot_session_contours(clr)
-
-    #
-    #
-    c.ax.set_xlim(0,512)
-    c.ax.set_ylim(0,512)
-
-    plt.show()
+    update_plots(c)
 
 # Define a function to handle the button click event
 def x_left_shift(event, c):
-    
-    # clear c.ax completely
-    c.ax.clear()
 
     #
     c.x_shift-=1
-    #print ("x_shift: ", c.x_shift)
 
     #
-    c.session_id = c.session_selected
-    clr= 'blue'
-    c.plot_session_contours(clr, c.x_shift, c.y_shift, c.theta,
-                             c.theta_x, c.theta_y)
+    c.alignment_logger.append(['x_shift', -1])
 
     #
-    c.session_id = 0
-    clr= 'red'
-    c.plot_session_contours(clr)
-
-    #
-    #
-    c.ax.set_xlim(0,512)
-    c.ax.set_ylim(0,512)
-
-    plt.show()
+    update_plots(c)
 
 
 # Define a function to handle the button click event
 def y_up_shift(event, c):
     
-    # clear c.ax completely
-    c.ax.clear()
-
     #
     c.y_shift+=1
-    #print ("x_shift: ", c.x_shift)
+    c.alignment_logger.append(['y_shift', 1])
 
     #
-    c.session_id = c.session_selected
-    clr= 'blue'
-    c.plot_session_contours(clr, c.x_shift, c.y_shift, c.theta,
-                             c.theta_x, c.theta_y)
-
-    #
-    c.session_id = 0
-    clr= 'red'
-    c.plot_session_contours(clr)
-
-    #
-    #
-    c.ax.set_xlim(0,512)
-    c.ax.set_ylim(0,512)
-
-    plt.show()
+    update_plots(c)
 
 # Define a function to handle the button click event
 def y_down_shift(event, c):
     
-    # clear c.ax completely
-    c.ax.clear()
-
     #
     c.y_shift-=1
-    #print ("x_shift: ", c.x_shift)
+    c.alignment_logger.append(['y_shift', -1])
 
     #
-    c.session_id = c.session_selected
-    clr= 'blue'
-    c.plot_session_contours(clr, c.x_shift, c.y_shift, c.theta,
-                             c.theta_x, c.theta_y)
-
-    #
-    c.session_id = 0
-    clr= 'red'
-    c.plot_session_contours(clr)
-
-    #
-    #
-    c.ax.set_xlim(0,512)
-    c.ax.set_ylim(0,512)
-
-    plt.show()
-
-
+    update_plots(c)
 
 # Define a function to handle the button click event
 def rotate_plus(event, c):
-    
-     # clear c.ax completely
-    c.ax.clear()
 
     #
     c.theta+=0.1
 
-    #
-    c.session_id = c.session_selected
-    clr= 'blue'
-    c.plot_session_contours(clr, c.x_shift, c.y_shift, c.theta,
-                             c.theta_x, c.theta_y)
+    c.alignment_logger.append(['theta', +0.1])
 
     #
-    c.session_id = 0
-    clr= 'red'
-    c.plot_session_contours(clr)
-
-    #
-    #
-    c.ax.set_xlim(0,512)
-    c.ax.set_ylim(0,512)
-
-    plt.show()
+    update_plots(c)
 
 # Define a function to handle the button click event
 def rotate_minus(event, c):
     
-    c.ax.clear()
-
-    print ("rotating minus")
+    #
     c.theta-=0.1
+    c.alignment_logger.append(['theta', -0.1])
 
+    update_plots(c)
+
+
+# Define a function to handle the button click event
+def scale_plus(event, c):
+    
+    # 
+    c.scale_factor = c.scale_factor*1.001
+    c.alignment_logger.append(['scale', 1.001])
+
+    #
+    update_plots(c)
+
+# Define a function to handle the button click event
+def scale_minus(event, c):
+    
+    #c.theta-=0.1
+    c.scale_factor = c.scale_factor*0.999
+    c.alignment_logger.append(['scale', 0.999])
+
+    update_plots(c)
+
+#
+def update_plots(c):
+
+    #
+    c.ax.clear()
 
     #
     c.session_id = c.session_selected
     clr= 'blue'
-    c.plot_session_contours(clr, c.x_shift, c.y_shift, c.theta,
-                             c.theta_x, c.theta_y)
+    c.plot_session_contours(clr, 
+                            c.x_shift, 
+                            c.y_shift, 
+                            c.theta,
+                            c.theta_x, 
+                            c.theta_y,
+                            c.scale_factor)
 
     #
     c.session_id = 0
@@ -4202,21 +4164,29 @@ def rotate_minus(event, c):
     c.ax.set_xlim(0,512)
     c.ax.set_ylim(0,512)
 
+    c.ax.set_title("Scale factor: "+str(c.scale_factor))
+   # c.ax.legend()
+
     plt.show()
 
-    # Define a function to handle the button click event
+
+
+# Define a function to handle the button click event
 def exit_plot(event, c):
     
 
     # print animal id, session id and x_shift and y_shift
-    print ("animal_id: ", c.animal_id, 
-           "  session_id: ", c.session_id, 
-           "  x_shift: ", c.x_shift, 
-           "  y_shift: ", c.y_shift,
-           " x_theta: ", c.theta,
-           " x_theta_x: ", c.theta_x,
-           " x_theta_y: ", c.theta_y,
-           )
+    print ("animal_id: ", c.animal_id)
+    print ("session_id: ", c.session_id)
+    print ("x_shift: ", c.x_shift)
+    print ("y_shift: ", c.y_shift)
+    print ("theta: ", c.theta)
+    print ("theta_x: ", c.theta_x)
+    print ("theta_y: ", c.theta_y)
+    print ("scale_factor: ", c.scale_factor)
+
+    #
+    print ("Logger: ", c.alignment_logger)
     
     # save all the parameters in an .npz file
     fname_out = os.path.join(c.root_dir,
@@ -4233,9 +4203,84 @@ def exit_plot(event, c):
             theta = c.theta,
             theta_x = c.theta_x,
             theta_y = c.theta_y,
+            scale_factor = c.scale_factor,
+            alignment_logger = c.alignment_logger
             )
-
+            
 
     plt.close()
 
 
+# rotate cells             
+def rotate_points(points, cx, cy, theta):
+    # Convert the angle to radians
+    theta = np.radians(theta)
+    
+    # Create a rotation matrix
+    rotation_matrix = np.array([
+        [np.cos(theta), -np.sin(theta)],
+        [np.sin(theta), np.cos(theta)]
+    ])
+    
+    # Create a matrix of points
+    points_matrix = np.column_stack((points[:, 0] - cx, points[:, 1] - cy))
+    
+    # Apply the rotation matrix to the points
+    rotated_points_matrix = np.dot(points_matrix, rotation_matrix.T)
+    
+    # Translate the points back to the original coordinate system
+    rotated_points = rotated_points_matrix + np.array([cx, cy])
+    
+    return rotated_points
+
+
+def reload_alignment(c):
+
+
+    d = np.load(os.path.join(c.root_dir,
+                                c.animal_id,
+                                c.session_ids[c.session_selected],
+                                'alignment_parameters.npz'),
+                allow_pickle=True)
+    
+    c.x_shift = d['x_shift']
+    c.y_shift = d['y_shift']
+    c.theta = d['theta']
+    c.theta_x = d['theta_x']
+    c.theta_y = d['theta_y']
+    c.scale_factor = d['scale_factor']
+
+    print ("x_shift: ", c.x_shift)
+    print ("y_shift: ", c.y_shift)
+    print ("theta: ", c.theta)
+    print ("theta_x: ", c.theta_x)
+    print ("theta_y: ", c.theta_y)
+    print ("scale_factor: ", c.scale_factor)
+
+
+
+    ########################################
+    fig = plt.figure(figsize=(10,10))
+
+    #
+    c.ax = plt.subplot(1,1,1)
+
+    #
+    c.session_id = 0
+    clr = 'red'
+    c.plot_session_contours(clr)
+
+    #
+    c.session_id = c.session_selected
+    clr = 'blue'
+    c.plot_session_contours(clr,
+                            c.x_shift,
+                            c.y_shift,
+                            c.theta,
+                            c.theta_x,
+                            c.theta_y,
+                            c.scale_factor
+                            )
+
+    #
+    plt.legend()

@@ -3,8 +3,6 @@ import numpy as np
 from tqdm import trange
 
 from scipy import ndimage as ndi
-from skimage.segmentation import watershed
-from skimage.feature import peak_local_max
 from scipy import signal
 import scipy
 import scipy.ndimage
