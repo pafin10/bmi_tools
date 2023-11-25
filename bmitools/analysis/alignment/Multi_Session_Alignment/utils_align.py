@@ -1456,7 +1456,7 @@ class Merger:
         return shifted_rotated_center_points_yx, all_shifted_rotated_contour_points
 
     #
-    def shift_rotate_stat_cells(self, 
+    def shift_rotate_scale_stat_cells(self, 
                                 session, 
                                 stat, 
                                 yx_shift, 
@@ -1638,7 +1638,7 @@ class Merger:
             print("Working on session ...", session.session_id)
             
             #
-            moved_session_stat = self.shift_rotate_stat_cells(session,
+            moved_session_stat = self.shift_rotate_scale_stat_cells(session,
                                                               session.stat,
                                                               yx_shift=session.yx_shift,
                                                               rot_angle=session.rot_angle,
@@ -1720,27 +1720,32 @@ class Merger:
         num_footprints = footprints.shape[0]
         num_min_cells_per_process = 10
         num_parallel_processes = 30 if num_footprints/30>num_min_cells_per_process else int(num_footprints/num_min_cells_per_process)
-        ids = np.array_split(np.arange(num_footprints, dtype="int64"), num_parallel_processes)
+        
+        ids = np.array_split(np.arange(num_footprints, dtype="int64"), 
+                             num_parallel_processes)
 
         if num_batches > num_parallel_processes:
             num_batches = num_parallel_processes
 
         #TODO: will results in an error, if np.array_split is used on inhomogeneouse data like ids on Scicore
-        batches = np.array_split(ids, num_batches) if num_batches!=1 else [ids]
+        #batches = ids #np.array_split(ids, num_batches) if num_batches!=1 else [ids]
         results = np.array([])
         num_cells = 0
-        for batch in batches:
-            res = parmap.map(find_overlaps1,
-                            batch,
-                            footprints,
-                            #c.footprints_bin,
-                            pm_processes=16,
-                            pm_pbar=True,
-                            pm_parallel=parallel)
-            for cell_batch in res:
-                num_cells += len(cell_batch)
-                for cell in cell_batch:
-                    results = np.append(results, cell)
+        res = parmap.map(find_overlaps1,
+                        ids,
+                        footprints,
+                        #c.footprints_bin,
+                        pm_processes=16,
+                        pm_pbar=True,
+                        pm_parallel=parallel)
+
+        #        
+        for cell_batch in res:
+            num_cells += len(cell_batch)
+            for cell in cell_batch:
+                results = np.append(results, cell)
+        
+        #
         results = results.reshape(num_cells, 5)
         res = [results]
         df = make_overlap_database(res)
