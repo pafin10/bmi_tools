@@ -4208,6 +4208,11 @@ def update_plots(c):
     plt.show()
 
 
+# Define a function to handle the button click event
+def exit(event, c):
+    c.exit_flag = True
+    
+    plt.close()
 
 # Define a function to handle the button click event
 def save_data(event, c):
@@ -4474,6 +4479,10 @@ def align_gui_local(ca_object):
     button4 = Button(button_ax4, 'save')
     button4.on_clicked(lambda event: save_data(event, calcium_object))
 
+    button_ax41 = plt.axes([0.8, 0.05, 0.05, 0.03])
+    button41 = Button(button_ax41, 'exit without saving')
+    button41.on_clicked(lambda event: exit(event, calcium_object))
+
     #
     button_ax5 = plt.axes([0.64, 0.01, 0.05, 0.03])
     button5 = Button(button_ax5, 'rotate +')
@@ -4505,4 +4514,5 @@ def align_gui_local(ca_object):
     plt.show(block=True)
 
     #
-    reload_alignment(calcium_object)
+    if calcium_object.exit_flag==False:
+        reload_alignment(calcium_object)
