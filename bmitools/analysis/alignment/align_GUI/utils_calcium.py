@@ -4262,6 +4262,9 @@ def save_data(event, c):
     
     plt.close()
 
+    #
+    calcium_object.exit_flag = False
+
 
 # rotate cells             
 def rotate_points(points, cx, cy, theta):
@@ -4409,7 +4412,7 @@ def align_gui_local(ca_object):
     calcium_object.scale_factor_x = 1
     calcium_object.scale_factor_y = 1
     calcium_object.n_cells_show = 200
-    calcium_object.exit_flag = False
+    calcium_object.exit_flag = True
 
 
     #
