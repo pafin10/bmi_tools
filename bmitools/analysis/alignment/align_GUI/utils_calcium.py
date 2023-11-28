@@ -4411,7 +4411,7 @@ def align_gui_local(ca_object):
     calcium_object.scale_y = 256
     calcium_object.scale_factor_x = 1
     calcium_object.scale_factor_y = 1
-    calcium_object.n_cells_show = 200
+    #calcium_object.n_cells_show = 200
     calcium_object.exit_flag = True
 
 
