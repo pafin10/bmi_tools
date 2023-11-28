@@ -4202,7 +4202,7 @@ def update_plots(c):
     c.ax.set_xlim(0,512)
     c.ax.set_ylim(0,512)
 
-    c.ax.set_title("Scale factor: "+str(c.scale_factor))
+    #c.ax.set_title("Scale factor: "+str(c.scale_factor))
    # c.ax.legend()
 
     plt.show()
@@ -4409,6 +4409,7 @@ def align_gui_local(ca_object):
     calcium_object.scale_factor_x = 1
     calcium_object.scale_factor_y = 1
     calcium_object.n_cells_show = 200
+    calcium_object.exit_flag = False
 
 
     #
@@ -4439,10 +4440,10 @@ def align_gui_local(ca_object):
     #
     calcium_object.session_id = 0
     clr = 'red'
-    session_id=0
     calcium_object.plot_session_contours(clr)
 
     #
+    print ("selected session: ", calcium_object.session_ids[calcium_object.session_selected])
     calcium_object.session_id = calcium_object.session_selected
     clr = 'blue'
     calcium_object.plot_session_contours(clr)
