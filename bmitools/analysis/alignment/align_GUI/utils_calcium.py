@@ -11,6 +11,7 @@ from openpyxl import load_workbook
 from scipy.signal import savgol_filter
 from scipy.interpolate import interp1d
 from dtw import dtw
+from matplotlib.widgets import Button
 
 #
 from calcium import Calcium
@@ -3494,7 +3495,8 @@ class ProcessCalcium():
                               theta =0,
                               theta_x = 256,
                               theta_y = 256,
-                              scale_factor = 1
+                              scale_factor_x = 1,
+                              scale_factor_y = 1,
                               ):
 
         # replotting 
@@ -3510,16 +3512,23 @@ class ProcessCalcium():
             temp= temp2.copy()
 
             # rescale all contours by this factor but from self.scale_x and self.scale_y as centre
-            #temp3
-            temp2[:,0] = (temp2[:,0] - self.scale_x)*scale_factor + self.scale_x
-            temp2[:,1] = (temp2[:,1] - self.scale_y)*scale_factor + self.scale_y
+            # only the centres of the cells shift not the shape of the cells...
+            # get centres of cells
+            centre = np.mean(temp,0)
 
-            # shift cells
-            temp[:,0] = temp2[:,1]+x_shift
-            temp[:,1] = temp2[:,0]+y_shift
-         
+            # scale centres by subtracing from the centre theta_x and theta_y and then scaling by scale_factor
+            xx = (centre[0] - theta_x)*scale_factor_x + theta_x
+            yy = (centre[1] - theta_y)*scale_factor_y + theta_y
+
+            # move the contour from the centre to the new centre
+            temp = temp - centre + np.array([xx,yy])
+
             #
             temp = rotate_points(temp, theta_x, theta_y, theta)
+
+            # shift the contour by x_shift and y_shift
+            temp[:,0] = temp[:,0] + x_shift
+            temp[:,1] = temp[:,1] + y_shift
 
             #
             self.ax.plot(temp[:,0],
@@ -4089,10 +4098,16 @@ def y_up_shift(event, c):
 
 # Define a function to handle the button click event
 def y_down_shift(event, c):
+
+    global calcium_object
+
+    calcium_object = c
+
+    print ("YDOWN")
     
     #
-    c.y_shift-=1
-    c.alignment_logger.append(['y_shift', -1])
+    calcium_object.y_shift-=1
+    calcium_object.alignment_logger.append(['y_shift', -1])
 
     #
     update_plots(c)
@@ -4119,23 +4134,45 @@ def rotate_minus(event, c):
 
 
 # Define a function to handle the button click event
-def scale_plus(event, c):
+def scale_y_plus(event, c):
     
     # 
-    c.scale_factor = c.scale_factor*1.001
-    c.alignment_logger.append(['scale', 1.001])
+    c.scale_factor_y = c.scale_factor_y*1.01
+    c.alignment_logger.append(['scale_y', 1.01])
 
     #
     update_plots(c)
 
+def scale_y_minus(event, c):
+    
+    # 
+    c.scale_factor_y = c.scale_factor_y*0.99
+    c.alignment_logger.append(['scale_y', 0.99])
+
+    #
+    update_plots(c)
+
+
+
+
 # Define a function to handle the button click event
-def scale_minus(event, c):
+def scale_x_plus(event, c):
     
     #c.theta-=0.1
-    c.scale_factor = c.scale_factor*0.999
-    c.alignment_logger.append(['scale', 0.999])
+    c.scale_factor_x = c.scale_factor_x*1.01
+    c.alignment_logger.append(['scale_x', 1.01])
 
     update_plots(c)
+
+#
+def scale_x_minus(event, c):
+    
+    #c.theta-=0.1
+    c.scale_factor_x = c.scale_factor_x*0.99
+    c.alignment_logger.append(['scale_x', 0.99])
+
+    update_plots(c)
+
 
 #
 def update_plots(c):
@@ -4152,7 +4189,8 @@ def update_plots(c):
                             c.theta,
                             c.theta_x, 
                             c.theta_y,
-                            c.scale_factor)
+                            c.scale_factor_x,
+                            c.scale_factor_y)
 
     #
     c.session_id = 0
@@ -4172,7 +4210,7 @@ def update_plots(c):
 
 
 # Define a function to handle the button click event
-def exit_plot(event, c):
+def save_data(event, c):
     
 
     # print animal id, session id and x_shift and y_shift
@@ -4183,7 +4221,8 @@ def exit_plot(event, c):
     print ("theta: ", c.theta)
     print ("theta_x: ", c.theta_x)
     print ("theta_y: ", c.theta_y)
-    print ("scale_factor: ", c.scale_factor)
+    print ("scale_factor x: ", c.scale_factor_x)
+    print ("scale_factor y: ", c.scale_factor_y)
 
     #
     print ("Logger: ", c.alignment_logger)
@@ -4203,11 +4242,19 @@ def exit_plot(event, c):
             theta = c.theta,
             theta_x = c.theta_x,
             theta_y = c.theta_y,
-            scale_factor = c.scale_factor,
+            scale_factor_x = c.scale_factor_x,
+            scale_factor_y = c.scale_factor_y,
             alignment_logger = c.alignment_logger
             )
-            
 
+    # 
+
+    fname_out = os.path.join(calcium_object.root_dir,
+                                calcium_object.animal_id,
+                                str(calcium_object.session_ids[calcium_object.session_selected]),
+                                'alignment_saved.png')
+    plt.savefig(fname_out,dpi=300)
+    
     plt.close()
 
 
@@ -4248,19 +4295,19 @@ def reload_alignment(c):
     c.theta = d['theta']
     c.theta_x = d['theta_x']
     c.theta_y = d['theta_y']
-    c.scale_factor = d['scale_factor']
+    c.scale_factor_x = d['scale_factor_x']
+    c.scale_factor_y = d['scale_factor_y']
 
     print ("x_shift: ", c.x_shift)
     print ("y_shift: ", c.y_shift)
     print ("theta: ", c.theta)
     print ("theta_x: ", c.theta_x)
     print ("theta_y: ", c.theta_y)
-    print ("scale_factor: ", c.scale_factor)
-
-
+    print ("scale_factor x: ", c.scale_factor_x)
+    print ("scale_factor y: ", c.scale_factor_y)
 
     ########################################
-    fig = plt.figure(figsize=(10,10))
+    plt.figure(figsize=(10,10))
 
     #
     c.ax = plt.subplot(1,1,1)
@@ -4279,8 +4326,183 @@ def reload_alignment(c):
                             c.theta,
                             c.theta_x,
                             c.theta_y,
-                            c.scale_factor
+                            c.scale_factor_x,
+                            c.scale_factor_y
                             )
 
     #
     plt.legend()
+
+    fname_out = os.path.join(calcium_object.root_dir,
+                                calcium_object.animal_id,
+                                str(calcium_object.session_ids[calcium_object.session_selected]),
+                                'alignment_reloaded.png')
+    plt.savefig(fname_out,dpi=300)
+
+    plt.close()
+
+
+
+#
+def on_mouse_click(event):
+
+    global calcium_object
+    
+    if event.button == 1:  # Check if left mouse button (button 1) is clicked
+
+        if event.inaxes == calcium_object.ax:    
+
+            # figure out which quadrant you are in relative to [0,512] and [0,512] plot and x,y centre coordinates
+
+            if event.xdata < calcium_object.theta_x and event.ydata < calcium_object.theta_y:
+                print ("bottom left quadrant")
+            elif event.xdata < calcium_object.theta_x and event.ydata > calcium_object.theta_y:
+                print ("top left quadrant")
+            elif event.xdata > calcium_object.theta_x and event.ydata < calcium_object.theta_y:   
+                print ("bottom right quadrant")
+            elif event.xdata > calcium_object.theta_x and event.ydata > calcium_object.theta_y:
+                print ("top right quadrant")
+                
+            # plot dashed axies
+
+    if event.button == 2:  # Check if middel button pressed
+        print("Middle button pressed")
+
+        if event.inaxes == calcium_object.ax:
+            x, y = event.xdata, event.ydata
+
+            #
+            print("Setting centre to: ", x, y)
+
+            #
+            calcium_object.theta_x = x
+            calcium_object.theta_y = y
+
+            #
+            calcium_object.scale_x = x
+            calcium_object.scale_y = y
+
+            calcium_object.alignment_logger.append(['scale', 0.999])
+
+            calcium_object.plot_quadrants()
+
+#
+def align_gui_local(ca_object):
+
+    global calcium_object
+
+    calcium_object = ca_object
+
+    #
+    calcium_object.x_shift = 0 
+    calcium_object.y_shift = 0
+    calcium_object.theta = 0
+    calcium_object.theta_x = 256
+    calcium_object.theta_y = 256
+    calcium_object.scale_x = 256
+    calcium_object.scale_y = 256
+    calcium_object.scale_factor_x = 1
+    calcium_object.scale_factor_y = 1
+    calcium_object.n_cells_show = 200
+
+
+    #
+    calcium_object.cell_idxs = np.random.choice(len(calcium_object.sessions[calcium_object.session_selected].contours), 
+                                size=min(calcium_object.n_cells_show, 
+                                            len(calcium_object.sessions[calcium_object.session_selected].contours)), 
+                                replace=False)
+    calcium_object.day_cell_idx = np.random.choice(len(calcium_object.sessions[0].contours),
+                                        size=min(calcium_object.n_cells_show, 
+                                                len(calcium_object.sessions[0].contours)),
+                                        replace=False)
+
+    #
+    calcium_object.alignment_logger = []
+
+    ########################################
+    ########################################
+    ########################################
+    #
+    fig = plt.figure(figsize=(10,10))
+
+    # Connect the mouse click event to the callback function
+    fig.canvas.mpl_connect('button_press_event', on_mouse_click)
+
+    #
+    calcium_object.ax = plt.subplot(1,1,1)
+
+    #
+    calcium_object.session_id = 0
+    clr = 'red'
+    session_id=0
+    calcium_object.plot_session_contours(clr)
+
+    #
+    calcium_object.session_id = calcium_object.session_selected
+    clr = 'blue'
+    calcium_object.plot_session_contours(clr)
+
+    #
+    plt.legend()
+
+    #
+    plt.xlim(0,512)
+    plt.ylim(0,512)
+
+    # Create a button widget
+    button_ax = plt.axes([0.12, 0.04, 0.05, 0.03])
+    button = Button(button_ax, 'x_right')
+    button.on_clicked(lambda event: x_right_shift(event, calcium_object))
+
+    #
+    button_ax1 = plt.axes([0.05, 0.04, 0.05, 0.03])
+    button1 = Button(button_ax1, 'x_left')
+    button1.on_clicked(lambda event: x_left_shift(event, calcium_object))
+
+    #
+    button_ax2 = plt.axes([0.08, 0.07, 0.05, 0.03])
+    button2 = Button(button_ax2, 'y_up')
+    button2.on_clicked(lambda event: y_up_shift(event, calcium_object))
+
+    #
+    button_ax3 = plt.axes([0.08, 0.01, 0.05, 0.03])
+    button3 = Button(button_ax3, 'y_down')
+    button3.on_clicked(lambda event: y_down_shift(event, calcium_object))
+
+    #
+    button_ax4 = plt.axes([0.8, 0.01, 0.05, 0.03])
+    button4 = Button(button_ax4, 'save')
+    button4.on_clicked(lambda event: save_data(event, calcium_object))
+
+    #
+    button_ax5 = plt.axes([0.64, 0.01, 0.05, 0.03])
+    button5 = Button(button_ax5, 'rotate +')
+    button5.on_clicked(lambda event: rotate_plus(event, calcium_object))
+
+    #
+    button_ax6 = plt.axes([0.7, 0.01, 0.05, 0.03])
+    button6 = Button(button_ax6, 'rotate -')
+    button6.on_clicked(lambda event: rotate_minus(event, calcium_object))
+
+    #######################################
+    button_ax7 = plt.axes([0.4, 0.01, 0.05, 0.03])
+    button7 = Button(button_ax7, 'scale y - ')
+    button7.on_clicked(lambda event: scale_y_minus(event, calcium_object))
+
+    button_ax8 = plt.axes([0.4, 0.07, 0.05, 0.03])
+    button8 = Button(button_ax8, 'scale y + ')
+    button8.on_clicked(lambda event: scale_y_plus(event, calcium_object))
+
+    #
+    button_ax9 = plt.axes([0.35, 0.035, 0.05, 0.03])
+    button9 = Button(button_ax9, 'scale x - ')
+    button9.on_clicked(lambda event: scale_x_minus(event, calcium_object))
+
+    button_ax10 = plt.axes([0.45, 0.035, 0.05, 0.03])
+    button10 = Button(button_ax10, 'scale x + ')
+    button10.on_clicked(lambda event: scale_x_plus(event, calcium_object))
+
+    plt.show(block=True)
+
+    #
+    reload_alignment(calcium_object)

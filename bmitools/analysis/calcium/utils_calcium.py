@@ -20,7 +20,7 @@ from scipy.signal import butter, sosfilt
 
 
 #
-from binarize2pcalcium import binarize2pcalcium as binca
+import binarize2pcalcium.binarize2pcalcium as binca
 
 #
 def smooth_ca_time_series4(diff):
@@ -329,6 +329,7 @@ class ProcessCalcium():
                                 'results',
                                 'best_matches.npy')
         
+        #
         if os.path.exists(  fname_out)==False or self.recompute_match_master_mask:
             #
             sessions_F_filtered = []
@@ -338,14 +339,15 @@ class ProcessCalcium():
             #
             cell_names = ['roi_pos1','roi_pos2','roi_neg1','roi_neg2']
             res = parmap.map(find_best_match_bmi_vs_mastermask,
-                            cell_names,
-                            self.root_dir,
-                            self.animal_id,
-                            sessions_F_filtered,
-                            self.session_ids,
-                            pm_processes=4,
-                            pm_pbar=True)
+                             cell_names,
+                             self.root_dir,
+                             self.animal_id,
+                             sessions_F_filtered,
+                             self.session_ids,
+                             pm_processes=4,
+                             pm_pbar=True)
 
+            #
             print ("res: ", res)
 
             # make 4 panels with histogram of best match
@@ -581,8 +583,8 @@ class ProcessCalcium():
                                                                     session,
                                                                     self.session_ids)
                     #
-                    rois1[:,:100]=0
-                    rois2[:,:100]=0
+                    rois1[:,:300]=0
+                    rois2[:,:300]=0
                     
                     #
                     traces_realtime[0].extend(rois1[0])
@@ -607,16 +609,18 @@ class ProcessCalcium():
             for k in range(traces.shape[0]):
                 
                 # plot merged-mask traces
+                temp = traces[k]
                 ax.plot(t,
-                        traces[k]+k*self.y_scale,
+                        temp+k*self.y_scale,
                         c=self.clrs[k],
                         label="[ca] merged mask" if k==0 else None
                         )
                 
                 # plot BMI realtime ensemble signals
                 if self.show_realtime_bmi_ensembles:
+                    temp = traces_realtime[k]
                     ax.plot(t,
-                            traces_realtime[k]+k*self.y_scale,
+                            temp+k*self.y_scale,
                             '--',
                             c=self.clrs[k],
                             label="Realtime BMI signal" if k==0 else None
@@ -624,8 +628,9 @@ class ProcessCalcium():
                 
                 # plot binarization traces
                 if self.show_upphases:
+                    temp = traces_bin[k]
                     ax.plot(t,
-                            traces_bin[k]+k*self.y_scale,
+                            temp+k*self.y_scale,
                             #'-.',
                             linewidth=1,
                             alpha=0.4,
@@ -4101,7 +4106,7 @@ class ProcessCalcium():
                 return
 
             #
-            C = binca.Calcium(os.path.join(self.root_dir,
+            C = binca.Binarize(os.path.join(self.root_dir,
                                            str(self.animal_id)),
                                            str(session_))
 
@@ -4109,11 +4114,12 @@ class ProcessCalcium():
             C.data_type = '2p'
 
             #
-            C.remove_bad_cells = self.remove_bad_cells
-            C.recompute_binarization = self.recompute_binarization
 
             #
             C.set_default_parameters_2p()
+
+            # overwrite some of the defaults here.
+            C.remove_bad_cells = self.remove_bad_cells
             C.recompute_binarization = self.recompute_binarization
 
             #
@@ -4577,6 +4583,7 @@ def load_results_npz_standalone(root_dir,
     fname = os.path.join(root_dir,
                         animal_id,
                         str(session_ids[session_id]),
+                        'data',
                         'results.npz')
     #
     results = np.load(fname, allow_pickle=True)

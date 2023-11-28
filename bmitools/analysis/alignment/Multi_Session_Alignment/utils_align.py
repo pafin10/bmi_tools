@@ -10,13 +10,16 @@ from matplotlib.lines import Line2D
 import pandas as pd
 import parmap
 import networkx as nx
+import sklearn
 
 # Suite2p for TIFF file analysis
 import suite2p
 from suite2p.registration import register
 import shutil
 import psutil
+from tqdm import trange
 
+import matplotlib.pyplot as plt
 from calcium import Calcium
 
 class Animal2:
@@ -55,7 +58,7 @@ class Animal2:
             #
             self.session_id = session
 
-            #
+            # load Calcium object self.c
             recompute_binarization, remove_bad_cells = False, True
             self.load_data(recompute_binarization, 
                             remove_bad_cells)
@@ -90,13 +93,24 @@ class Animal2:
                                                 str(self.session_id),
                                                 "alignment_parameters.npz")
                 d = np.load(fname_alignment)
-                self.c.yx_shift = [d["x_shift"], d["y_shift"]]  
+                self.c.yx_shift = [d["y_shift"], d["x_shift"]]  
                 self.c.rot_angle = d["theta"]                
-                self.c.rot_center_yx = [d["theta_x"], d["theta_y"]]
+                self.c.rot_center_yx = [d["theta_y"], d["theta_x"]]
                 self.c.scale = d["scale_factor"]
 
             #            
             self.c.session_id = session
+
+            #
+            self.c.suite2p_path = self.c.data_dir
+
+            #
+            self.c.binary_path = os.path.join(self.root_dir,
+                                             self.animal_id,
+                                             str(self.session_id),
+                                             'data',
+                                             'Image_001_001.raw'
+                                            )
 
             # append the loaded calcium object
             self.sessions.append(self.c)
@@ -130,6 +144,7 @@ class Animal2:
                                         )
 
     #
+    #
     def merge_sessions_bmi(self):
 
         #       
@@ -161,29 +176,37 @@ class Animal2:
                                                 reference_session, 
                                                 parallel = True)
             
+            return 
+
             # save the master mask in the animal directory
-            np.save(os.path.join(merged_session_dir, "stat.npy"), 
+            np.save(os.path.join(merged_session_dir, 
+                                 "stat.npy"), 
                     merged_stat)
-        
         #
         else:
             merged_stat = np.load(os.path.join(merged_session_dir, 
                                                "stat.npy"), 
                                                 allow_pickle=True)
             
+        # make comparison contours for every session
+        merger.save_aligned_contours_images(self)
+            
         #
-        print(f"Number of cells after merging: {merged_stat.shape[0]}")
+        print(f"Number of cells in master mask: {merged_stat.shape[0]}")
 
+        return
         # Update all sessions based on merged mask
         for session in self.sessions:
 
             # Redo the suite2p runs for all sessions - including the reference session
-            print("Updating session ", session)
+            print("Updating session ", session.session_id)
             
             # shift and rotate merged mask to correct cell locations
             # and update suite2p files in session
             merger.shift_update_session_s2p_files_bmi(session, 
                                                       merged_stat)
+
+        print ("...DONE MERGING ....")
 
     #
     def set_ops(self, ops=None):
@@ -1333,7 +1356,7 @@ class Merger:
         rotated_points_int = rotated_points.astype(int)
         return rotated_points_int
 
-
+    #
     def scale_points(self, 
                      temp2, 
                      rot_center_yx, 
@@ -1396,20 +1419,21 @@ class Merger:
                 shifted_rotated_contour_points = shifted_points_yx
 
         # do final scaling
+        #shifted_rotated_scaled_points = self
         shifted_rotated_scaled_points = self.scale_points(shifted_rotated_contour_points,
-                                                          rot_center_yx, 
-                                                          scale)
-        #
+                                                         rot_center_yx, 
+                                                         scale)
+        
         return shifted_rotated_scaled_points
 
     #
     def shift_rotate_scale_contour_cloud(self, 
                                          stat,
-                                        yx_shift,
-                                        rot_angle,
-                                        rot_center_yx,
-                                        scale,
-                                        roation_first=False):
+                                         yx_shift,
+                                         rot_angle,
+                                         rot_center_yx,
+                                         scale,
+                                         roation_first=False):
         """
         Shift and rotate the cell contour cloud.
 
@@ -1426,44 +1450,52 @@ class Merger:
         This function shifts and rotates the cell contour points of multiple cells based on the provided shift and rotation parameters.
 
         """
-        # shift center of cells
+        # align cell center points
         center_points_yx = np.array([cell_stat["med"] for cell_stat in stat])
         shifted_rotated_center_points_yx = self.shift_rotate_scale_yx_points(center_points_yx, 
-                                                        yx_shift=yx_shift, 
-                                                        rot_angle=rot_angle,
-                                                        rot_center_yx=rot_center_yx,
-                                                        scale=scale,
-                                                        roation_first=roation_first)
+                                                                             yx_shift=yx_shift, 
+                                                                             rot_angle=rot_angle,
+                                                                             rot_center_yx=rot_center_yx,
+                                                                             scale=scale,
+                                                                             roation_first=roation_first)
         # shift, rotate cell contour pixels
-        all_shifted_rotated_contour_points = []
         
         # calculate corrected yxshift
         # code below can be used if roation is not affine
         # corrected_yxshifts = shifted_rotated_center_points_yx - center_points_yx
         # for num, (cell_stat, corrected_yxshift) in enumerate(zip(stat, corrected_yxshifts)):
 
+        shifted_rotated_cell_masks = []
         for num, cell_stat in enumerate(stat):
             points_yx = self.create_points_from_stat(cell_stat)
             # shift, rotate cell contour pixels
-            shifted_rotated_contour_points = self.shift_rotate_scale_yx_points(points_yx, 
-                                                                        yx_shift=yx_shift, 
-                                                                        rot_angle=rot_angle,
-                                                                        rot_center_yx=rot_center_yx,
-                                                                        scale=scale,
-                                                                        roation_first=roation_first)
-            all_shifted_rotated_contour_points.append(shifted_rotated_contour_points)
+            shifted_rotated_cell_mask = self.shift_rotate_scale_yx_points(points_yx, 
+                                                                               yx_shift=yx_shift, 
+                                                                               rot_angle=rot_angle,
+                                                                               rot_center_yx=rot_center_yx,
+                                                                               scale=scale,
+                                                                               roation_first=roation_first)
+            
+            #
+            shifted_rotated_cell_masks.append(shifted_rotated_cell_mask)
 
-        return shifted_rotated_center_points_yx, all_shifted_rotated_contour_points
+        #
+        stat_cells = []
+        for num, cell_stat in enumerate(stat):
+            stat_cells.append(self.create_points_from_stat(cell_stat))
+
+        #show_two_session_contours(stat_cells, all_shifted_rotated_cell_mask)
+        return shifted_rotated_center_points_yx, shifted_rotated_cell_masks
 
     #
     def shift_rotate_scale_stat_cells(self, 
-                                session, 
-                                stat, 
-                                yx_shift, 
-                                rot_angle, 
-                                rot_center_yx,
-                                scale,
-                                roation_first):
+                                      session, 
+                                      stat, 
+                                      yx_shift, 
+                                      rot_angle, 
+                                      rot_center_yx,
+                                      scale,
+                                      roation_first):
         """
         Shift and rotate the statistical data of cells within a session.
 
@@ -1482,10 +1514,10 @@ class Merger:
 
         """
         # stat files first value ist y-value second is x-value
-        stat = session.stat if type(stat)!=np.ndarray else stat
-        yx_shift = session.yx_shift if not yx_shift else yx_shift
-        rot_angle = session.rot_angle if rot_angle==None else rot_angle
-        rot_center_yx = session.rot_center_yx if not rot_center_yx else rot_center_yx
+        # stat = session.stat if type(stat)!=np.ndarray else stat
+        # yx_shift = session.yx_shift if not yx_shift else yx_shift
+        # rot_angle = session.rot_angle if rot_angle==None else rot_angle
+        # rot_center_yx = session.rot_center_yx if not rot_center_yx else rot_center_yx
         new_stat = copy.deepcopy(stat)
 
         # scale the contour prior to shift and rotate
@@ -1493,11 +1525,13 @@ class Merger:
         #    
         (shifted_rotated_center_points_yx, 
          all_shifted_rotated_contour_points) = self.shift_rotate_scale_contour_cloud(new_stat, 
-                                                                                    yx_shift=yx_shift, 
-                                                                                    rot_angle=rot_angle,
-                                                                                    rot_center_yx=rot_center_yx,
-                                                                                    scale=scale,
-                                                                                    roation_first=roation_first)
+                                                                                     yx_shift=yx_shift, 
+                                                                                     rot_angle=rot_angle,
+                                                                                     rot_center_yx=rot_center_yx,
+                                                                                     scale=scale,
+                                                                                     roation_first=roation_first)
+        
+        #
         for cell_stat, center_point, shifted_rotated_contour_points in zip(new_stat, 
                                                                            shifted_rotated_center_points_yx, 
                                                                            all_shifted_rotated_contour_points):
@@ -1505,6 +1539,8 @@ class Merger:
             # set new cell contour pixels
             cell_stat["ypix"] = shifted_rotated_contour_points[:, 0]
             cell_stat["xpix"] = shifted_rotated_contour_points[:, 1]
+
+        #
         return new_stat
 
     #
@@ -1537,7 +1573,10 @@ class Merger:
             yx_shift = list(-np.array(session.yx_shift))
             rot_angle = -session.rot_angle
             rot_center_yx = session.rot_center_yx
-            scale = session.scale
+
+            #
+            #scale = session.scale
+            scale = 1./session.scale
 
             #
             if rot_angle == 0 and sum(abs(np.array(yx_shift)))==0:
@@ -1545,12 +1584,12 @@ class Merger:
 
             #
             _, all_shifted_rotated_contour_points = self.shift_rotate_scale_contour_cloud(stat=stat, 
-                                                                                        yx_shift=yx_shift, 
-                                                                                        rot_angle=rot_angle,
-                                                                                        rot_center_yx=rot_center_yx,
-                                                                                        scale=scale,
-                                                                                        roation_first=True)
-            
+                                                                                          yx_shift=yx_shift, 
+                                                                                          rot_angle=rot_angle,
+                                                                                          rot_center_yx=rot_center_yx,
+                                                                                          scale=scale,
+                                                                                          roation_first=True)
+            #
             for cell_num, shifted_rotated_contour_points in enumerate(all_shifted_rotated_contour_points):
                 for point in shifted_rotated_contour_points:
                     # check if point is out of bounds
@@ -1560,12 +1599,64 @@ class Merger:
                 
         # removing out of bound cells 
         remove_cells.sort()
+        remove_cells = np.unique(remove_cells)
         for abroad_cell in remove_cells[::-1]:
             stat = np.delete(stat, abroad_cell)
         if len(remove_cells)>0:
             print(f"removed abroad cells: {remove_cells}")
+        else:
+            print (" no out of bounds cells...")
+
+        #
         return stat
 
+    def stat_to_contours(self, stat):
+
+        #
+        import cv2
+
+        #   
+        contours = []         
+        for k in trange(len(stat)):
+            points = np.array([stat[k]['xpix'], 
+                             stat[k]['ypix']]).T
+
+            #
+            img = np.zeros((512, 512), dtype=np.uint8)
+            for k in range(points.shape[0]):
+                img[points[k][0],points[k][1]] = 1
+
+#
+            #
+            hull_points = cv2.findContours(img,cv2.RETR_TREE,cv2.CHAIN_APPROX_NONE)[0][0].squeeze()
+
+            # check for weird single isolated pixel cells
+            if hull_points.shape[0]==2:
+                dists = sklearn.metrics.pairwise_distances(points)
+                idx = np.where(dists==0)
+                dists[idx]=1E3
+                mins = np.min(dists,axis=1)
+
+                # find pixels that are more than 1 pixel away from nearest neighbour
+                idx = np.where(mins>1)[0]
+
+                # delete isoalted points
+                points = np.delete(points, idx, axis=0)
+
+                #
+                img = np.zeros((512, 512), dtype=np.uint8)
+                img[points[:, 0], points[:, 1]] = 1
+                hull_points = cv2.findContours(img,cv2.RETR_TREE,cv2.CHAIN_APPROX_NONE)[0][0].squeeze()
+
+            # add last point
+            hull_points = np.vstack((hull_points, hull_points[0]))
+
+            #
+            contours.append(hull_points)
+
+        return contours
+
+    #
     def stat_to_footprints(self, stat: np.ndarray, dims=[512, 512]):
         """
         Converts cell statistics to footprints.
@@ -1594,6 +1685,62 @@ class Merger:
         footprints = imgs
         return footprints
 
+   
+
+
+    def save_aligned_contours_images(self, animal):
+        
+        # 
+        for session in animal.sessions:
+
+            #
+            fname_out = os.path.join(animal.root_dir,
+                                    animal.animal_id,
+                                    str(session.session_id),
+                                    'plane0',
+                                    'merged',
+                                    'figures',
+                                    'contour_comparison.png')
+
+            # 
+            s1_fname = os.path.join(animal.root_dir,
+                                    animal.animal_id,
+                                    str(session.session_id),
+                                    'plane0',
+                                    'merged',
+                                    'stat.npy'
+                                    )
+            
+            #
+            s2_fname = os.path.join(animal.root_dir,
+                                    animal.animal_id,
+                                    str(session.session_id),
+                                    'plane0',
+                                    'stat.npy'
+                                    )
+            
+            #
+            s3_fname = os.path.join(animal.root_dir,
+                                    animal.animal_id,
+                                    'merged',
+                                    'stat.npy')
+            
+
+            
+            #
+            stat1 = np.load(s1_fname,
+                            allow_pickle=True)
+            stat2 = np.load(s2_fname,
+                            allow_pickle=True)
+            stat3 = np.load(s3_fname,
+                            allow_pickle=True)
+            
+            # call make_
+            make_aligned_contours(fname_out,
+                                        stat1,
+                                        stat2,
+                                        stat3)
+
     #
     def merge_stat_bmi(self, 
                        sessions,
@@ -1618,55 +1765,110 @@ class Merger:
         image_y_size = reference_session.image_y_size
         num_batches = get_num_batches_based_on_available_ram()
         
-        moved_session_stat_no_abroad = self.remove_abroad_cells(reference_session.stat, 
-                                                                sessions, 
-                                                                image_x_size=image_x_size, 
-                                                                image_y_size=image_y_size)
+        #################### TO REVIEW ############################
+        # This function just returns day0 mask but removes some boundary cells depending on how shifted bmis essions where 
+        # NOT Clear if this is necessary as can be done later in the pipeline
+        # moved_session_stat_no_abroad = self.remove_abroad_cells(reference_session.stat, 
+        #                                                         sessions, 
+        #                                                         image_x_size=image_x_size, 
+        #                                                         image_y_size=image_y_size)
         
-        #
-        merged_footprints = self.stat_to_footprints(moved_session_stat_no_abroad)
-        merged_stat = moved_session_stat_no_abroad
+        # grab footprints and stat from reference session
+        master_stat = reference_session.stat
+        master_footprints = self.stat_to_footprints(master_stat)
+        master_contours = self.stat_to_contours(master_stat)
+
+        # save master contours as a dictionary
+        master_contours_dict = {}
+        for k in range(len(master_contours)):
+            master_contours_dict[k] = master_contours[k]
+
+ 
         
-        #
+        #######################################################
+        # this loop:
+        # - adds cells each session 
+        # - shifts and rotates them
+        # - deduplicates them
         for session in sessions:
          
             #
-            if session.session_type == 'day0' or session.session_type =="merged":
+            if session.session_type == 'day0':
                 print ("Skipping day0 ...", session.session_id)
                 continue
 
             print("Working on session ...", session.session_id)
             
             #
-            moved_session_stat = self.shift_rotate_scale_stat_cells(session,
-                                                              session.stat,
-                                                              yx_shift=session.yx_shift,
-                                                              rot_angle=session.rot_angle,
-                                                              rot_center_yx=session.rot_center_yx,
-                                                              scale=session.scale,
-                                                              roation_first=True)
+            session_contours = self.stat_to_contours(session.stat)
 
-
-            #
-            moved_session_stat_no_abroad = self.remove_abroad_cells(moved_session_stat, 
-                                                                    sessions, 
-                                                                    image_x_size=image_x_size, 
-                                                                    image_y_size=image_y_size)
+            # this function shifts the bmi session based on GUI rotation info
+            sesssion_stat_aligned = self.shift_rotate_scale_stat_cells(session,
+                                                                       session.stat,
+                                                                       yx_shift=session.yx_shift,
+                                                                       rot_angle=session.rot_angle,
+                                                                       rot_center_yx=session.rot_center_yx,
+                                                                       scale=session.scale,
+                                                                        #scale=1,
+                                                                       roation_first=True)
             
-            #
-            moved_footprints = self.stat_to_footprints(moved_session_stat_no_abroad)
+            session_contours_aligned = self.stat_to_contours(sesssion_stat_aligned)
 
             #
-            clean_cell_ids, merged_footprints = self.merge_deduplicate_footprints(merged_footprints, 
-                                                                                  moved_footprints, 
+            plt.figure()
+            if True:
+                for k in range(len(master_contours)):
+                    plt.plot(master_contours[k][:, 1], 
+                            master_contours[k][:, 0], 
+                            'red', 
+                            label='master' if k==0 else None)
+                    
+            #
+            for k in range(len(session_contours_aligned)):
+                plt.plot(session_contours_aligned[k][:, 1], 
+                         session_contours_aligned[k][:, 0], 
+                         'blue', 
+                         label="aligned "  + str(session.session_id) if k==0 else None)
+            
+            for k in range(len(session_contours_aligned)):
+                plt.plot(session_contours[k][:, 1], 
+                         session_contours[k][:, 0], 
+                         'black', 
+                         label="original session contours " if k==0 else None)
+                            
+            plt.legend()
+            plt.show()
+            return
+            
+
+            # this step removes out of bound cells
+            sesssion_stat_aligned = self.remove_abroad_cells(sesssion_stat_aligned, 
+                                                             sessions, 
+                                                             image_x_size=image_x_size, 
+                                                             image_y_size=image_y_size)
+            
+            # converts the cell pixle lists to a cell mask 
+            session_footprints = self.stat_to_footprints(sesssion_stat_aligned)
+
+            #
+            print ("master footprints", len(master_footprints), ", session footprints", len(session_footprints))                            
+            clean_cell_ids, master_footprints = self.merge_deduplicate_footprints(master_footprints, 
+                                                                                  session_footprints, 
                                                                                   parallel=parallel, 
                                                                                   num_batches=num_batches)
+            print ("POST: master footprints", len(master_footprints), ", session footprints", len(session_footprints))                            
             
             # 
-            merged_stat = np.concatenate([merged_stat, moved_session_stat_no_abroad])[clean_cell_ids]
+            print ("master stat", len(master_stat), ", session stat", len(sesssion_stat_aligned))
+            master_stat = np.concatenate([master_stat, 
+                                          sesssion_stat_aligned])[clean_cell_ids]
+            print ("POST: master stat", len(master_stat), ", session stat", len(sesssion_stat_aligned))
+
+            #
+            print ("")
     
         #
-        return merged_stat
+        return master_stat
     
 
     # def find_overlaps1(self, ids, footprints):
@@ -1751,6 +1953,7 @@ class Merger:
         df = make_overlap_database(res)
         return df
     
+    #
     def find_candidate_neurons_overlaps(self, df_overlaps: pd.DataFrame, 
                                         corr_array=None, deduplication_use_correlations=False, 
                                         corr_max_percent_overlap=0.25, corr_threshold=0.3):
@@ -1859,15 +2062,38 @@ class Merger:
         clean_cell_ids (numpy array): Array of clean cell IDs after merging and deduplicating footprints.
         cleaned_merged_footprints (numpy array): Array of cleaned merged footprints.
         """
+        #
         merged_footprints = np.concatenate([footprints1, footprints2])
         num_cells = len(merged_footprints)
 
-        df_overlaps = self.generate_batch_cell_overlaps(merged_footprints, recompute_overlap=True, parallel=parallel, num_batches=num_batches)
-        candidate_neurons = self.find_candidate_neurons_overlaps(df_overlaps, corr_array=None, deduplication_use_correlations=False, corr_max_percent_overlap=0.25, corr_threshold=0.3)
-        G = self.make_correlated_neuron_graph(num_cells, candidate_neurons)
-        clean_cell_ids = self.delete_duplicate_cells(num_cells, G)
+        #
+        df_overlaps = self.generate_batch_cell_overlaps(merged_footprints, 
+                                                        recompute_overlap=True, 
+                                                        parallel=parallel, 
+                                                        num_batches=num_batches)
+        
+        #
+        candidate_neurons = self.find_candidate_neurons_overlaps(df_overlaps, 
+                                                                 corr_array=None, 
+                                                                 deduplication_use_correlations=False, 
+                                                                 corr_max_percent_overlap=0.25, 
+                                                                 corr_threshold=0.3)
+        
+        #
+        G = self.make_correlated_neuron_graph(num_cells, 
+                                              candidate_neurons)
+        
+        #
+        clean_cell_ids = self.delete_duplicate_cells(num_cells, 
+                                                     G)
+        
+        #
         cleaned_merged_footprints = merged_footprints[clean_cell_ids]
+    
+        #
         return clean_cell_ids, cleaned_merged_footprints
+    
+
 
     def shift_update_session_s2p_files_bmi(self, 
                                            session, 
@@ -1888,19 +2114,21 @@ class Merger:
         shift_to_session = list(-np.array(session.yx_shift))
         rotate_to_angle = -session.rot_angle
         rot_center_yx = session.rot_center_yx
-        scale = session.scale
+        scale = 1./session.scale
         
         #
-        shifted_rotated_session_stat = self.shift_rotate_stat_cells(stat=new_stat,
-                                                                    yx_shift=shift_to_session, 
-                                                                    rot_angle=rotate_to_angle,
-                                                                    rot_center_yx=rot_center_yx,
-                                                                    scale=scale,
-                                                                    roation_first=True)
-        #backup_path_files(suite2p_data_path)
+        shifted_rotated_session_stat = self.shift_rotate_scale_stat_cells(session,
+                                                                          stat=new_stat,
+                                                                            yx_shift=shift_to_session, 
+                                                                            rot_angle=rotate_to_angle,
+                                                                            rot_center_yx=rot_center_yx,
+                                                                            scale=scale,
+                                                                            #scale=1,
+                                                                            roation_first=True)
         
         #
-        session.update_s2p_files_bmi(shifted_rotated_session_stat)
+        update_s2p_files_bmi_standalone(session, 
+                                        shifted_rotated_session_stat)
 
     #
     def merge_s2p_files(self, sessions, stat, first_session="day0"):
@@ -2156,3 +2384,179 @@ def del_highest_connected_nodes(nn, c):
 
     good_cells = ids
     return good_cells, removed_cells
+
+
+#
+def update_s2p_files_bmi_standalone(c, stat):
+
+    # c is the calcium object, should have all the details
+
+
+    # Read in existing data from a suite2p run. We will use the "ops" and registered binary.
+    merged_suite2_data_path = os.path.join(c.suite2p_path,'merged')
+    original_suite2_data_path = c.suite2p_path
+
+    # check to see if the suite2p data path is already a directory
+    if os.path.isdir(merged_suite2_data_path)==False:
+        os.mkdir(merged_suite2_data_path)
+
+    #
+    binary_file_path = c.binary_path
+    
+    #
+    ops = np.load(os.path.join(original_suite2_data_path, "ops.npy"), allow_pickle=True).item()
+
+    # TODO : add motion correction
+
+
+    #
+    Lx = ops['Lx']
+    Ly = ops['Ly']
+    f_reg = suite2p.io.BinaryFile(Ly, Lx, binary_file_path)
+
+    """# Using these inputs, we will first mimic the stat array made by suite2p
+    masks = cellpose_masks['masks']
+    stat = []
+    for u_ix, u in enumerate(np.unique(masks)[1:]):
+        ypix,xpix = np.nonzero(masks==u)
+        npix = len(ypix)
+        stat.append({'ypix': ypix, 'xpix': xpix, 'npix': npix, 'lam': np.ones(npix, np.float32), 'med': [np.mean(ypix), np.mean(xpix)]})
+    stat = np.array(stat)
+    stat = roi_stats(stat, Ly, Lx)  # This function fills in remaining roi properties to make it compatible with the rest of the suite2p pipeline/GUI
+    """
+
+    # Feed these values into the wrapper functions
+    stat_after_extraction, F, Fneu, F_chan2, Fneu_chan2 = suite2p.extraction_wrapper(stat, 
+                                                                                        f_reg, 
+                                                                                        f_reg_chan2 = None, 
+                                                                                        ops=ops)
+    
+    # Do cell classification
+    classfile = suite2p.classification.builtin_classfile
+    iscell = suite2p.classify(stat=stat_after_extraction, 
+                                classfile=classfile)
+    
+    # Apply preprocessing step for deconvolution
+    dF = F.copy() - ops['neucoeff']*Fneu
+    dF = suite2p.extraction.preprocess(
+                                        F=dF,
+                                        baseline=ops['baseline'],
+                                        win_baseline=ops['win_baseline'],
+                                        sig_baseline=ops['sig_baseline'],
+                                        fs=ops['fs'],
+                                        prctile_baseline=ops['prctile_baseline']
+                                    )
+    
+    # Identify spikes
+    spks = suite2p.extraction.oasis(F=dF, 
+                                    batch_size=ops['batch_size'], 
+                                    tau=ops['tau'], 
+                                    fs=ops['fs'])
+
+    #
+    np.save(os.path.join(merged_suite2_data_path, 'F.npy'), F)
+    np.save(os.path.join(merged_suite2_data_path, 'Fneu.npy'), Fneu)
+    np.save(os.path.join(merged_suite2_data_path, 'iscell.npy'), iscell)
+    np.save(os.path.join(merged_suite2_data_path, 'ops.npy'), ops)
+    np.save(os.path.join(merged_suite2_data_path, 'spks.npy'), spks)
+    np.save(os.path.join(merged_suite2_data_path, 'stat.npy'), stat)
+
+
+
+def show_two_session_contours(contours1, contours2):
+
+    plt.figure()
+    for k in range(len(contours1)):
+        plt.plot(contours1[k][:,0],
+                    contours1[k][:,1],
+                    c='red'
+                    )
+    # show contours for session 2
+    for k in range(len(contours2)):
+        plt.plot(contours2[k][:,0],
+                    contours2[k][:,1],
+                    c='blue'
+                    )
+
+    plt.show()
+
+#
+def make_aligned_contours(fname_out,
+                            s1,
+                            s2,
+                            s3=None):
+
+    #
+    plt.figure(figsize=(10,10))
+    n_cells = 125
+
+    #            
+    jitter=1
+    for k in range(len(s1))[:n_cells]:
+        temp = [s1[k]['xpix'], 
+                s1[k]['ypix']]
+
+        # find convex hull of temp
+        from scipy.spatial import ConvexHull
+        hull = ConvexHull(np.array(temp).T)
+        temp = np.array(temp).T[hull.vertices]
+
+        # add the last point to close the contour
+        temp = np.vstack([temp, temp[0]])
+       # print ("temp.shape: ", temp.shape)
+
+        #
+        plt.plot(temp[:,0]+jitter, 
+                temp[:,1]+jitter, 
+                c='red',
+                label='Old Master mask (jittered) (from suite2prun)' if k==0 else "")
+
+    shift = 0
+    for k in range(len(s2))[:n_cells]:
+        temp = [s2[k]['xpix'], 
+                s2[k]['ypix']]
+
+        # find convex hull of temp
+        from scipy.spatial import ConvexHull
+        hull = ConvexHull(np.array(temp).T)
+        temp = np.array(temp).T[hull.vertices]
+
+        # add the last point to close the contour
+        temp = np.vstack([temp, temp[0]])
+       # print ("temp.shape: ", temp)
+#
+        #   
+        plt.plot(temp[:,0]+shift, 
+                 temp[:,1]+shift, 
+                c='blue',
+                label='original ' if k==0 else "")
+        
+    if s3 is not None:
+        shift = 1
+        for k in range(len(s3))[:n_cells]:
+            temp = [s3[k]['xpix'], 
+                    s3[k]['ypix']]
+
+            # find convex hull of temp
+            from scipy.spatial import ConvexHull
+            hull = ConvexHull(np.array(temp).T)
+            temp = np.array(temp).T[hull.vertices]
+
+            # add the last point to close the contour
+            temp = np.vstack([temp, temp[0]])
+
+            #
+            plt.plot(temp[:,0]+shift, 
+                        temp[:,1]+shift, 
+                        c='black',
+                        label='master mask updated + jitter (/animal_id/merged folder)' if k==0 else "")
+                
+
+    plt.title("Top "+str(n_cells)+" cells" + "\n"+str(fname_out), fontsize=10)
+
+    #
+    plt.legend(fontsize=10)
+    plt.show()
+
+    plt.savefig(fname_out, dpi=300)
+    plt.close()
