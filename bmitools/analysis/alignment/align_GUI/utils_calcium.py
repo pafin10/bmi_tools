@@ -108,7 +108,7 @@ class ProcessCalcium():
         try:
             data = np.load(fname, allow_pickle=True)
         except:
-            print ("Could not Day0 masks ... ")
+            print ("Could not find Day0 mask file... ", fname)
             return
            
         #
@@ -117,11 +117,10 @@ class ProcessCalcium():
 
         self.contours_ROIs = contours_all_cells[self.cell_ids]
 
-        
     #
     def compute_reward_centered_traces(self):
 
-        
+        #
         if True:
             parmap.map(get_reward_centered_traces,
                         self.session_ids,
@@ -132,9 +131,10 @@ class ProcessCalcium():
                         pm_processes=10,
                         pm_pbar=True)
 
-    ###################
+    #
     def plot_network_graph(self):
 
+        #
         print (self.reward_centered_traces.shape)
 
         #
@@ -3504,12 +3504,19 @@ class ProcessCalcium():
 
         if clr=='red':
             idxs = self.day_cell_idx
+            self.master_mask = []
         else:
             idxs = self.cell_idxs
+            self.session_mask = []
 
+        #
+        print ("# of contours in session contours: ", len(session_contours))
         for k in idxs:
             temp2 = session_contours[k].copy()
             temp= temp2.copy()
+
+            if k==0:
+                print ("first cell coords: ", temp)
 
             # rescale all contours by this factor but from self.scale_x and self.scale_y as centre
             # only the centres of the cells shift not the shape of the cells...
@@ -3539,8 +3546,12 @@ class ProcessCalcium():
                         label="session: "+str(self.session_id) if k==0 else ""
                         )
             
-
-
+            #
+            if clr=='red':
+                self.master_mask.append(temp)
+            else:
+                self.session_mask.append(temp)
+    
     #
     def plot_quadrants(self):
 
@@ -4233,9 +4244,7 @@ def save_data(event, c):
     print ("Logger: ", c.alignment_logger)
     
     # save all the parameters in an .npz file
-    fname_out = os.path.join(c.root_dir,
-                             c.animal_id,
-                             str(c.session_ids[c.session_selected]),
+    fname_out = os.path.join(c.alignment_dir,
                             'alignment_parameters.npz')
     
     #
@@ -4254,10 +4263,10 @@ def save_data(event, c):
 
     # 
 
-    fname_out = os.path.join(calcium_object.root_dir,
-                                calcium_object.animal_id,
-                                str(calcium_object.session_ids[calcium_object.session_selected]),
-                                'alignment_saved.png')
+    fname_out = os.path.join(c.alignment_dir,
+                            'GUI_alignment_saved.png')
+    
+    #
     plt.savefig(fname_out,dpi=300)
     
     plt.close()
@@ -4341,10 +4350,10 @@ def reload_alignment(c):
     #
     plt.legend()
 
-    fname_out = os.path.join(calcium_object.root_dir,
-                                calcium_object.animal_id,
-                                str(calcium_object.session_ids[calcium_object.session_selected]),
-                                'alignment_reloaded.png')
+    fname_out = os.path.join(c.root_dir,
+                                c.animal_id,
+                                str(c.session_ids[c.session_selected]),
+                                'GUI_alignment_reloaded.png')
     plt.savefig(fname_out,dpi=300)
 
     plt.close()
@@ -4415,15 +4424,36 @@ def align_gui_local(ca_object):
     calcium_object.exit_flag = True
 
 
+    #############################
+    # make alignment directory
+    alignment_dir = os.path.join(calcium_object.root_dir,
+                                 calcium_object.animal_id,
+                                 str(calcium_object.session_selected),
+                                 'alignment')
+
+    if os.path.exists(alignment_dir)==False:
+        os.mkdir(alignment_dir)
+
+
     #
-    calcium_object.cell_idxs = np.random.choice(len(calcium_object.sessions[calcium_object.session_selected].contours), 
-                                size=min(calcium_object.n_cells_show, 
-                                            len(calcium_object.sessions[calcium_object.session_selected].contours)), 
-                                replace=False)
-    calcium_object.day_cell_idx = np.random.choice(len(calcium_object.sessions[0].contours),
-                                        size=min(calcium_object.n_cells_show, 
-                                                len(calcium_object.sessions[0].contours)),
-                                        replace=False)
+    # calcium_object.cell_idxs = np.random.choice(len(calcium_object.sessions[calcium_object.session_selected].contours), 
+    #                             size=min(calcium_object.n_cells_show, 
+    #                                         len(calcium_object.sessions[calcium_object.session_selected].contours)), 
+    #                             replace=False)
+    
+    # #
+    # calcium_object.day_cell_idx = np.random.choice(len(calcium_object.sessions[0].contours),
+    #                                     size=min(calcium_object.n_cells_show, 
+    #                                             len(calcium_object.sessions[0].contours)),
+    #                                     replace=False)
+
+    calcium_object.cell_idxs = np.arange(0,
+                                         min(len(calcium_object.sessions[calcium_object.session_selected].contours),
+                                            calcium_object.n_cells_show), 1)
+    
+    calcium_object.day_cell_idx = np.arange(0,
+                                            min(len(calcium_object.sessions[0].contours),
+                                                calcium_object.n_cells_show), 1)
 
     #
     calcium_object.alignment_logger = []

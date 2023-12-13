@@ -17,7 +17,8 @@ from scipy.stats import pearsonr
 from tqdm import tqdm
 from scipy.signal import savgol_filter
 from scipy.signal import butter, sosfilt
-
+from scipy import stats
+import pickle
 
 #
 import binarize2pcalcium.binarize2pcalcium as binca
@@ -81,6 +82,94 @@ class ProcessCalcium():
 
         #
         self.clrs=['blue','lightblue','red','pink']
+
+    #
+    def make_correlation_dirs(self):
+
+        # Since i have no idea how to solve the problem with the missing wheel_flag i decided to do i like that
+        # You should look deeper into it
+        # Checking if variable wheel_flag is defined in locals or globals
+        
+        #
+        self.data_dir = os.path.join(self.root_dir,
+                                    self.animal_id,
+                                    str(self.session_ids[self.session_id]))
+
+        # make sure the data dir is correct
+        if self.shuffle_data:
+            data_dir = os.path.join(self.data_dir,'correlations_shuffled')
+        else:
+            data_dir = os.path.join(self.data_dir,'correlations')
+        self.make_dir(data_dir)
+
+
+        #
+        self.corr_dir = data_dir
+
+
+    def make_dir(self,data_dir):
+
+        # check if dir exists or make it
+        if os.path.exists(data_dir)==False:
+            os.mkdir(data_dir)
+
+    #
+    def compute_correlations(self, min_number_bursts=0):
+
+        ############## COMPUTE CORRELATIONS ###################
+
+        # turn off intrinsic parallization or this step goes too slow
+        os.environ['OPENBLAS_NUM_THREADS'] = '1'
+        os.environ['OMP_NUM_THREADS']= '1'
+
+        # compute correlations between neurons
+        rasters_DFF = self.sessions[self.session_id].F_filtered   # use fluorescence filtered traces
+        rasters = self.sessions[self.session_id].F_upphase_bin
+        self.min_number_bursts = min_number_bursts
+        # here we shuffle data as a control
+        if self.shuffle_data:
+            rasters, rasters_DFF = self.shuffle_rasters(rasters, rasters_DFF)
+
+        # if we subselect for moving periods only using wheel data velcoity
+        wheel_flag = False
+        
+        # select moving
+        text = 'all_states'
+        if self.subselect_moving_only and wheel_flag:
+            rasters = rasters[:, self.idx_run]
+            rasters_DFF = rasters_DFF[:, self.idx_run]
+
+            # add moving flag to filenames
+            text = 'moving'
+
+        elif self.subselect_quiescent_only and wheel_flag:
+            rasters = rasters[:, self.idx_quiescent]
+            rasters_DFF = rasters_DFF[:, self.idx_quiescent]
+
+            # add moving flag to filenames
+            text = 'quiescent'
+
+        
+
+        # select only good ids 
+        #rasters = rasters[self.clean_cell_ids]
+        #rasters_DFF = rasters_DFF[self.clean_cell_ids]
+
+        # self.corrs = compute_correlations(rasters, self)
+        self.corrs = compute_correlations_parallel(self.corr_dir,
+                                                    rasters,
+                                                    rasters_DFF,
+                                                    self.n_cores,
+                                                    # self.correlation_method,
+                                                    self.binning_window,
+                                                    self.subsample,
+                                                    self.scale_by_DFF,
+                                                    self.corr_parallel_flag,
+                                                    self.zscore,
+                                                    self.n_tests_zscore,
+                                                    self.recompute_correlation,
+                                                    self.min_number_bursts)
+        
 
     # #
     def load_day0_mask(self):
@@ -403,6 +492,8 @@ class ProcessCalcium():
                                     'results',
                                     'best_match_ensemble_cells.npy'),res)
             
+
+            
             # also save best_matches array
             np.save(fname_out,best_matches)
 
@@ -416,6 +507,17 @@ class ProcessCalcium():
         #
         self.best_matches = np.array(self.best_matches)
 
+
+    def load_best_matches(self):
+        fname = os.path.join(self.root_dir, 
+                                self.animal_id, 
+                                'results',
+                                'best_matches.npy')
+        
+        #           
+        self.best_matches = np.load(fname, allow_pickle=True)[:,1]
+
+        print ("self.best_matches: ", self.best_matches)
     #
     def plot_reward_centered_traces_ROIs_only(self):
 
@@ -653,7 +755,10 @@ class ProcessCalcium():
             # make light grey background shading every 90000 frames
             ctr=0
             for k in range(0, t_start, 2*90000):
-                ax.axvspan(t[k], t[k+90000], color='grey', alpha=0.05)
+                try:
+                    ax.axvspan(t[k], t[k+90000], color='grey', alpha=0.05)
+                except:
+                    pass
 
             # plot horizontal lines at zero
             ctr = 0
@@ -719,7 +824,7 @@ class ProcessCalcium():
         t_start = 0
         for session in trange(len(self.sessions), desc='loading sessions'):
             ca_bin = self.sessions[session].F_upphase_bin
-
+            print ("ca_bin: ", ca_bin.shape)
             # find where ca_bin is 1
             for p in range(ca_bin.shape[0]):
                 idx = np.where(ca_bin[p]==1)[0]
@@ -778,6 +883,8 @@ class ProcessCalcium():
         # make light grey background shading every 90000 frames
         ctr=0
         t = np.arange(rasters.shape[1])
+        print ("t_sart: ", t_start)
+        t_start-=cols
         for k in range(0, t_start, 2*90000):
             ax.axvspan(t[k]/self.fps, t[k+90000]/self.fps, color='grey', alpha=0.2)
 
@@ -3771,6 +3878,7 @@ class ProcessCalcium():
 
         return df
     
+    #
     def load_spreadsheet_entries(self, df):
          #
         self.thresh = df.loc[:, 'current_high_threshold'].values
@@ -3818,11 +3926,26 @@ class ProcessCalcium():
                 continue
 
             #
-            df = pd.read_excel(os.path.join(
+            fname_in = os.path.join(
                                 self.root_dir,
                                 self.animal_id,
                                 str(self.session_ids[session_id]),
-                                'results_fixed.xlsx'))
+                                'results_fixed.pkl')
+
+            #            
+            if os.path.exists(fname_in):
+                with open(fname_in, 'rb') as f:
+                    df = pickle.load(f)
+            else:
+                df = pd.read_excel(os.path.join(
+                                    self.root_dir,
+                                    self.animal_id,
+                                    str(self.session_ids[session_id]),
+                                    'results_fixed.xlsx'))
+                # save the dataframe as a pickle file
+                with open(fname_in, 'wb') as f:
+                    pickle.dump(df, f)
+
             #
             self.load_spreadsheet_entries(df)
 
@@ -4106,21 +4229,10 @@ class ProcessCalcium():
                 return
 
             #
-            C = binca.Binarize(os.path.join(self.root_dir,
-                                           str(self.animal_id)),
-                                           str(session_))
-
+            C = binca.Binarize()       
             C.data_dir = data_dir
             C.data_type = '2p'
-
-            #
-
-            #
             C.set_default_parameters_2p()
-
-            # overwrite some of the defaults here.
-            C.remove_bad_cells = self.remove_bad_cells
-            C.recompute_binarization = self.recompute_binarization
 
             #
             C.load_suite2p()
@@ -4128,20 +4240,27 @@ class ProcessCalcium():
             #
             C.load_footprints()
 
-            # 
+            # paramers for binarization
             C.dff_min = self.dff_min                  # min %DFF for [ca] burst to considered a spike (default 5%) overwrites percentile threshold parameter
             C.percentile_threshold = self.percentile_threshold   # this is pretty fixed, we don't change it; we want [ca] bursts that are well outside the "physics-caused"noise
             C.maximum_std_of_signal = self.maximum_std_of_signal     # if std of signal is greater than this, then we have a noisy signal and we don't want to binarize it
 
             #
             C.save_figures = self.save_figures
-            C.load_binarization()
+
+            # overwrite some of the defaults here.
+            C.remove_bad_cells = self.remove_bad_cells
+            C.recompute_binarization = self.recompute_binarization
+            
+            # 
+            C.load_binarization()            
 
             #
             self.sessions.append(C)
 
             #
             ctrs+=1
+            print ('')
 
     #
     def plot_ROIs_contours(self):
@@ -4653,15 +4772,16 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
 def get_reward_triggered_psth(session_id, 
                               c,
                               window,
-                              idx_cells):
+                              idx_cells,
+                              n_tests = 100):
 
     # get reward times for session
     reward_times = c.reward_times[session_id]
-    print ("session: ", session_id, " reward times: ", reward_times.shape)
+    print ("session: ", session_id, " of", len(c.session_ids)-1, ",  reward times: ", reward_times.shape)
 
     # get cells
     cells = c.sessions[session_id].F_upphase_bin
-    print ("cells: ", cells.shape)
+    #print ("cells: ", cells.shape)
 
     #
     psth = []
@@ -4684,19 +4804,32 @@ def get_reward_triggered_psth(session_id,
                 psth[k].append(temp2)
 
             # same for random times
-            idx = np.random.choice(np.arange(window,cells.shape[1]-window,1))
-            temp2 = temp[idx-window:idx+window]
-            if temp2.shape[0]==window*2:
-                psth_shuffled[k].append(temp2)
+            temp3 = []
+            for n in range(n_tests):
+                idx = np.random.choice(np.arange(window,cells.shape[1]-window,1))
+                temp2 = temp[idx-window:idx+window]
+                if temp2.shape[0]==window*2:
+                    temp3.append(temp2)
+
+            psth_shuffled[k].append(np.mean(temp3,0))
 
     #
     psths = np.array(psth)
     psths_shuffled = np.array(psth_shuffled)
 
     # average across trials
-    psths_avg = np.mean(psths,1)
-    psths_shuffled_avg = np.mean(psths_shuffled,1)
-   
+    if True:
+        psths_avg = np.nanmean(psths,1)
+        psths_shuffled_avg = np.nanmean(psths_shuffled,1)
+    else:
+        psths_avg = np.nanmedian(psths,1)
+        psths_shuffled_avg = np.nanmedian(psths_shuffled,1)
+
+    # find cells with all nans
+    psth_sums = np.nansum(psths_avg,1)
+    idx = np.where(psth_sums==0)[0]
+    psths_avg[idx]=0
+
     #
     if idx_cells is None:
          # order the cells by ptp in axis 1
@@ -4733,12 +4866,12 @@ def plot_multi_session_psth_imshow(c,
     plt.figure()
     from matplotlib import gridspec
     # make a gridspec with 7 rows and 7 columns
-    gs = gridspec.GridSpec(8,7)
+    gs = gridspec.GridSpec(8,len(c.session_ids)-1)
 
     #
     suas = []
     for k in range(psth_array.shape[0]):
-        ax = plt.subplot(gs[:6,k])
+        ax = plt.subplot(gs[:6, k])
 
         #
         ax.imshow(psth_array[k],
@@ -4757,15 +4890,16 @@ def plot_multi_session_psth_imshow(c,
         ax.plot([window,window],[0,psth_array.shape[1]],'r--')
 
         # change xticks to range from -3 to 3
-        tt1 = np.arange(0,psth_array.shape[2]+1,30)
+        #tt1 = np.arange(0,psth_array.shape[2]+1,30)
+        tt1 = np.linspace(0,psth_array.shape[2],5)
         tt2 = np.round(np.linspace(-window/30,window/30,tt1.shape[0]),1)
         ax.set_xticks(tt1,tt2)
-
 
         #
         if k==0:
             ax.set_ylabel("Cell #")
-            ax.set_yticks(np.arange(0,psth_array.shape[1],10),np.arange(0,psth_array.shape[1],10))
+            ax.set_yticks(np.arange(0,psth_array.shape[1],5),
+                          np.arange(0,psth_array.shape[1],5))
         else:
             ax.set_yticks([])
 
@@ -4789,7 +4923,11 @@ def plot_multi_session_psth_imshow(c,
         suas.append([temp,y[0]])
 
         ax.plot(temp,y[0],'black',linewidth=2)
+        
+        #
         ax.set_xlabel("# burst/min",fontsize=10)
+        
+        #
         if k==0:
             ax.set_ylabel("# cells")
 
@@ -4807,32 +4945,34 @@ def plot_multi_session_psth_imshow(c,
                 '--',
                 c='black', 
                 alpha=0.5)
-        
 
     #
-    plt.suptitle("Vmax = "+str(vmax),fontsize=20)
+    plt.suptitle(c.animal_id + "(Vmax = "+str(vmax)+")",fontsize=14)
 
     plt.show()
 
     return suas
 
 #
-def plot_psth(psths_avg,
+def plot_psth(c,
+              psths_avg,
               psths_shuffled_avg,
               session_id,
               axes,
               start_cell,
               idx_cells,
               show_random=False,
-              smoothing=False
+              smoothing=False,
+              window=100
               ):
+    
 
     # make viridis colormap for line plotting up to 7 sessions
-    cmap = matplotlib.cm.get_cmap('jet')
-    clrs = cmap(np.linspace(0, 1, 7))
-
+    cmap = matplotlib.cm.get_cmap('viridis')
+    clrs = cmap(np.linspace(0.25, 0.85, 8))
+    clrs_b = ['blue','lightblue','red','pink']
     #
-    t = np.arange(-100,100,1)/30.
+    t = np.arange(-window,window,1)/30.
 
     #
     cell_ids = np.arange(start_cell,start_cell+100,1)
@@ -4847,11 +4987,11 @@ def plot_psth(psths_avg,
             temp = butter_bandpass_filter(temp, 0.01, 1, 30, order=1)
             temp2 = butter_bandpass_filter(temp2, 0.01, 1, 30, order=1)
         
-        if k==89:
+        if k==0:
             ax.plot(t,temp,
                 c=clrs[session_id-1],
                 label="session: "+str(session_id))
-            ax.legend(fontsize=6)
+            ax.legend(fontsize=5)
         else:
             ax.plot(t,temp,
                 c=clrs[session_id-1])
@@ -4865,21 +5005,38 @@ def plot_psth(psths_avg,
         ###############################################
         # plot vertical line at reward time
         # get ylimits or range from axes[k]
+        ax.relim()
+        ax.autoscale_view()
+        
         ymin, ymax = ax.get_ylim()
-        ax.set_ylim(bottom=0,top=ymax)
+        #ax.set_ylim(bottom=0)
 
-        ax.plot([t[100],t[100]],
+        ax.plot([t[window],t[window]],
                  [0,ymax],'b--')
         
-        #
-        ax.set_title(str(idx_cells[k]),fontsize=10,
-                pad=0.1)
-        
-        #
-        if ctr%10==0:
-            ax.set_ylabel("DF/F")
+        # 
+        idx_b = np.where(idx_cells[k]==c.best_matches)[0]
+        if idx_b.shape[0]>0:
+            print ("found roi: ", idx_b[0], ", matches cell: ", idx_cells[k],
+                   "ctr : ", ctr)
+            ax.set_title(str(idx_cells[k]),
+                         fontsize=10,
+                         color = clrs_b[idx_b[0]],
+                         pad=0.1)
         else:
-            ax.set_yticks([])
+            ax.set_title(str(idx_cells[k]),
+                         fontsize=10,
+                         pad=0.1)
+
+
+        #
+        #if ctr%10==0:
+        #ax.set_ylabel("DF/F")
+        #else:
+        #    ax.set_yticks([])
+
+        # set yticks fontsize
+        ax.tick_params(axis='y', labelsize=5, pad=0.1)
 
         # 
         if ctr<90:
@@ -4889,6 +5046,96 @@ def plot_psth(psths_avg,
 
     return idx_cells
 
+
+
+#
+def plot_psth_rois_only(c,
+                        psths_avg,
+                        psths_shuffled_avg,
+                        session_id,
+                        axes,
+                        start_cell,
+                        idx_cells,
+                        show_random=False,
+                        smoothing=False,
+                        window=100
+                        ):
+
+    # make viridis colormap for line plotting up to 7 sessions
+    cmap = matplotlib.cm.get_cmap('viridis')
+    clrs = cmap(np.linspace(0.25, 0.85, 8))
+    clrs_b = ['blue','lightblue','red','pink']
+    #
+    t = np.arange(-window,window,1)/30.
+
+    #
+    cell_ids = np.arange(c.sessions[session_id].F_upphase_bin.shape[0])
+    ctr=0
+    for k in cell_ids:
+    #for ctr, k, in enumerate(c.best_matches):
+        
+        #
+        temp = psths_avg[idx_cells[k]]
+        temp2 = psths_shuffled_avg[idx_cells[k]]
+        # use savgol filter to smooth from scipy
+        if smoothing:
+            temp = butter_bandpass_filter(temp, 0.01, 1, 30, order=1)
+            temp2 = butter_bandpass_filter(temp2, 0.01, 1, 30, order=1)
+        
+       
+
+        ###############################################
+        ###############################################
+        ###############################################
+        # plot vertical line at reward time
+        # get ylimits or range from axes[k]
+        
+        # 
+        idx_b = np.where(idx_cells[k]==c.cells_to_plot)[0]
+        if idx_b.shape[0]>0:
+            ax=axes[ctr]
+            ax.set_title(str(idx_cells[k]),
+                         fontsize=10,
+                         color = clrs_b[idx_b[0]],
+                         pad=0.1)
+            
+            #
+            if ctr==0:
+                ax.plot(t,temp,
+                    c=clrs[session_id-1],
+                    label="session: "+str(session_id))
+                ax.legend(fontsize=5)
+            else:
+                ax.plot(t,temp,
+                    c=clrs[session_id-1])
+
+            #
+            if show_random:
+                ax.plot(t,temp2,'black', alpha=0.5)
+                
+            ax.relim()
+            ax.autoscale_view()
+            
+            ymin, ymax = ax.get_ylim()
+            #ax.set_ylim(bottom=0)
+
+            ax.plot([t[window],t[window]],
+                    [0,ymax],'b--')
+
+
+            # set yticks fontsize
+            #ax.tick_params(axis='y', labelsize=5, pad=0.1)
+
+            # 
+            ax.set_xlabel("Time (sec)",fontsize=10)
+
+            #
+            ctr+=1
+
+
+    return idx_cells
+
+#
 def preprocess_trace(temp):
 
     # smooth with a sliding window
@@ -4951,7 +5198,10 @@ def find_best_match_bmi_vs_mastermask(cell_name,
             cell = preprocess_trace(cell)
 
             # Compute the Pearson correlation
-            correlation, _ = pearsonr(cell, roi)
+            try:
+                correlation, _ = pearsonr(cell, roi)
+            except:
+                correlation = 0
             corrs.append(correlation)
 
         # find armgax as best match
@@ -4969,3 +5219,413 @@ def find_best_match_bmi_vs_mastermask(cell_name,
 
     #
     return best_cells
+
+
+def compute_correlations_parallel(data_dir,
+                                  rasters,
+                                  rasters_DFF,
+                                  n_cores,
+                                  #method='all',
+                                  binning_window=30,
+                                  subsample=5,
+                                  scale_by_DFF=False,
+                                  corr_parallel_flag=True,
+                                  zscore=False,
+                                  n_tests_zscore=1000,
+                                  recompute_correlation=False,
+                                  min_number_bursts=0):
+
+    """
+    This function computes pairwise Pearson correlations between different rasters in a parallelized manner.
+
+    Parameters:
+    data_dir (str): The directory where the data is stored.
+    rasters (np.array): The rasters to be processed.
+    rasters_DFF (np.array): The rasters to be processed after applying DeltaF/F.
+    n_cores (int): The number of cores to be used for parallel processing.
+    binning_window (int, optional): The size of the binning window. Default is 30.
+    subsample (int, optional): The subsampling rate. Default is 5.
+    scale_by_DFF (bool, optional): A flag indicating whether to scale by DeltaF/F. Default is False.
+    corr_parallel_flag (bool, optional): A flag indicating whether to run the correlation computation in parallel. Default is True.
+    zscore (bool, optional): A flag indicating whether to compute the z-score. Default is False.
+    n_tests_zscore (int, optional): The number of tests to be performed for z-score computation. Default is 1000.
+    recompute_correlation (bool, optional): A flag indicating whether to recompute the correlation. Default is False.
+    min_number_bursts (int, optional): The minimum number of bursts required. Default is 0.
+
+    Returns:
+    None. The function saves the computed correlations to a .npz file in 'data_dir'.
+    
+    Note: If a file with the same name already exists in 'data_dir' and 'recompute_correlation' is False,
+          the function will return without doing anything.
+    """
+    # make a small class to hold all the input variables
+    class C:
+        pass
+
+    c1 = C()
+    c1.n_cores = n_cores
+    c1.n_tests = n_tests_zscore
+    #c1.correlation_method = method
+    c1.binning_window = binning_window
+    c1.subsample = subsample
+    c1.scale_by_DFF = scale_by_DFF
+    c1.corr_parallel_flag = corr_parallel_flag
+    c1.zscore = zscore
+    c1.rasters = rasters
+    c1.rasters_DFF = rasters_DFF
+    c1.recompute_correlation = recompute_correlation
+    c1.min_number_bursts = min_number_bursts
+    
+    #
+    print ("... computing pairwise pearson correlation ...")
+    print (" RASTERS IN: ", rasters.shape)
+    print (" BINNING WINDOW: ", binning_window)
+
+    # split data
+    #ids = np.array_split(np.arange(rasters.shape[0]),100)
+    # for correlations_parallel2 function we don't need to split ids anymore
+    ids = np.arange(rasters.shape[0])
+
+    # make output directory 'correlations'
+    # check to see if data_dir exists:
+    if os.path.exists(data_dir)==False:
+        os.mkdir(data_dir)
+
+    # add dynamic data_dir
+    if zscore:
+        data_dir = os.path.join(data_dir,'zscore')
+        if os.path.exists(data_dir)==False:
+            os.mkdir(data_dir)
+    else:
+        data_dir = os.path.join(data_dir,'threshold')
+        if os.path.exists(data_dir)==False:
+            os.mkdir(data_dir)
+
+    # finally add the 'correlations' directory
+    data_dir = os.path.join(data_dir,'correlations')
+    if os.path.exists(data_dir)==False:
+        os.mkdir(data_dir)
+
+    #
+    c1.data_dir = data_dir
+
+    # convert object into a dictionary
+    c1 = c1.__dict__
+
+    #############################################################
+    #############################################################
+    #############################################################
+    # run parallel
+    if corr_parallel_flag:
+        parmap.map(correlations_parallel2,
+                    ids,
+                    c1,
+                    pm_processes=n_cores,
+                    pm_pbar = True
+                    )
+    else:
+        for k in tqdm(ids, desc='computing intercell correlation'):
+            correlations_parallel2(k,
+                                   c1)
+            
+
+
+# this computes the correlation for a single cell against all others and then saves it to disk
+def correlations_parallel2(id, 
+                           c1):
+    """
+    This function computes the correlation between different rasters in a parallelized manner.
+
+    Parameters:
+    id (int): The ID of the raster to be processed.
+    c1 (dict): A dictionary containing various parameters and data needed for the computation.
+
+    The dictionary 'c1' has the following keys:
+    - data_dir (str): The directory where the data is stored.
+    - rasters (np.array): The rasters to be processed.
+    - rasters_DFF (np.array): The rasters to be processed after applying DeltaF/F.
+    - binning_window (int): The size of the binning window.
+    - subsample (int): The subsampling rate.
+    - scale_by_DFF (bool): A flag indicating whether to scale by DeltaF/F.
+    - zscore (bool): A flag indicating whether to compute the z-score.
+    - n_tests (int): The number of tests to be performed.
+    - recompute_correlation (bool): A flag indicating whether to recompute the correlation.
+    - min_number_bursts (int): The minimum number of bursts required.
+
+    Returns:
+    None. The function saves the computed correlations to a .npz file in 'data_dir'.
+    
+    Note: If a file with the same name already exists in 'data_dir' and 'recompute_correlation' is False, 
+          the function will return without doing anything.
+    """
+    # extract values from dicionary c1
+    data_dir = c1["data_dir"]
+    rasters = c1["rasters"]
+    rasters_DFF = c1["rasters_DFF"]
+    binning_window = c1["binning_window"]
+    subsample = c1["subsample"]
+    scale_by_DFF = c1["scale_by_DFF"]
+    zscore = c1["zscore"]
+    n_tests = c1["n_tests"]
+    recompute_correlation = c1["recompute_correlation"]
+    min_number_bursts = c1["min_number_bursts"]
+
+    # 
+    fname_out = os.path.join(data_dir,
+                                str(id)+ '.npz'
+                                )
+
+    # not used for now, but may wish to skip computation if file already exists
+    if os.path.exists(fname_out) and recompute_correlation==False:
+        return
+
+    #        
+    temp1 = rasters[id][::subsample]
+
+    # scale by rasters_DFF
+    if scale_by_DFF:
+        temp1 = temp1*rasters_DFF[id][::subsample]
+
+    # bin data in chunks of size binning_window
+    if binning_window!=1:
+        tt = []
+        for q in range(0, temp1.shape[0], binning_window):
+            temp = np.sum(temp1[q:q + binning_window])
+            tt.append(temp)
+        temp1 = np.array(tt)
+
+    #
+    corrs = []
+    for p in range(rasters.shape[0]):
+        temp2 = rasters[p][::subsample]
+        
+        # scale by rasters_DFF
+        if scale_by_DFF:
+            temp2 = temp2*rasters_DFF[p][::subsample]
+        
+        # 
+        if binning_window!=1:
+            tt = []
+            for q in range(0, temp2.shape[0], binning_window):
+                temp = np.sum(temp2[q:q + binning_window])
+                tt.append(temp)
+            temp2 = np.array(tt)
+        
+        #
+        corr, corr_z = get_corr2(temp1, temp2, zscore, n_tests, min_number_bursts)
+
+        # 
+        corrs.append([id, p, corr[0], corr[1], corr_z[0]])
+
+    #
+    corrs = np.vstack(corrs)
+    #
+    np.savez(fname_out, 
+             binning_window = binning_window,
+             subsample = subsample,
+             scale_by_DFF = scale_by_DFF,
+             zscore_flag = zscore,
+             id = id,
+             compared_cells = corrs[:,1],
+             pearson_corr = corrs[:,2],
+             pvalue_pearson_corr = corrs[:,3],
+             z_score_pearson_corr = corrs[:,4],
+             n_tests = n_tests,
+            )
+
+    #return corrs
+
+
+
+def get_corr2(temp1, temp2, zscore, n_tests=1000, min_number_bursts=0):
+    """
+    This function calculates the Pearson correlation coefficient between two arrays of data, temp1 and temp2. 
+    If zscore is True, the function also calculates the z-score of the correlation coefficient based on n_tests random shuffles of temp2.
+    
+    :param temp1: 1D numpy array of data
+    :param temp2: 1D numpy array of data
+    :param zscore: boolean, if True calculate z-score of correlation coefficient
+    :param n_tests: int, number of random shuffles to perform when calculating z-score (default=1000)
+    :param min_number_bursts: int, minimum number of bursts
+    :return: tuple containing the Pearson correlation coefficient between temp1 and temp2, and the z-score of the correlation coefficient (if zscore=True) or np.nan (if zscore=False)
+    """
+    # check if all values are the same 
+    if len(np.unique(temp1))==1 or len(np.unique(temp2))==1:
+        corr = [np.nan,1]
+        return corr, [np.nan]
+    
+    # check if number bursts will be below self.min_num_bursts
+    if np.sum(temp1!=0)<min_number_bursts or np.sum(temp2!=0)<min_number_bursts:
+        corr = [np.nan,1]
+        return corr, [np.nan]
+
+    # if using dynamic correlation we need to compute the correlation for 1000 shuffles
+    corr_original = scipy.stats.pearsonr(temp1, temp2)
+
+    # make array and keep track
+    corr_array = []
+    corr_array.append(corr_original[0])
+                                
+    #
+    if zscore:
+        corr_s = []
+        for k in range(n_tests):
+            # choose a random index ranging from 0 to the length of the array minus 1
+            idx = np.random.randint(-temp2.shape[0], temp2.shape[0],1)
+            #idx = np.random.randint(temp2.shape[0])
+            temp2_shuffled = np.roll(temp2, idx)
+            corr_s = scipy.stats.pearsonr(temp1, temp2_shuffled)
+            corr_array.append(corr_s[0])
+
+        # compute z-score
+        corr_z = stats.zscore(corr_array)
+
+    else:
+        corr_z = [np.nan]
+
+    return corr_original, corr_z
+
+
+def get_si2(rate_map,
+            time_map):
+    
+    #
+    duration = np.ma.sum(time_map)
+    position_PDF = time_map / (duration + np.spacing(1))
+
+    mean_rate = np.ma.sum(rate_map * position_PDF)
+    #mean_rate_sq = np.ma.sum(np.ma.power(rate_map, 2) * position_PDF)
+
+    #max_rate = np.max(rate_map)
+
+    #if mean_rate_sq != 0:
+    #    sparsity = mean_rate * mean_rate / mean_rate_sq
+
+    #if mean_rate != 0:
+    #selectivity = max_rate / mean_rate
+
+    log_argument = rate_map / (mean_rate+0.00001)
+    log_argument[log_argument < 1] = 1
+
+    #
+    inf_rate = np.ma.sum(position_PDF * rate_map * np.ma.log2(log_argument))
+    inf_content = inf_rate / (mean_rate+0.00001)
+
+    return inf_rate, inf_content
+
+#
+def compute_si_1D(cell_ids,
+                  cells,           # this is the calcium activivty in the session
+                  reward_times,
+                  root_dir,
+                  animal_id,
+                  session_name,
+                  window,
+                  n_tests,
+                  recompute=False,
+                  plotting=False):
+
+    #
+    for cell_id in cell_ids:
+        #
+        fname_out = os.path.join(root_dir,
+                                animal_id,
+                                session_name,
+                                'spatial_info',
+                                str(cell_id)+'.npz')
+
+        #                             
+        if os.path.exists(fname_out)==False or recompute:
+
+            #
+            psth = []
+            psth_shuffled = []
+            n_bursts = []
+            #for k in trange(cells.shape[0]):
+            k = cell_id
+            psth.append([])
+            psth_shuffled.append([])
+
+            # [ca] activity
+            cell = cells[k]
+
+            # count the number of bursts in temp
+            diff = cell[1:]-cell[:-1]
+            idx = np.where(diff==1)[0]
+            n_bursts.append(idx.shape[0])
+
+            # So time map should just count over and over again 
+            time_map = []
+            rate_map = []
+            temp_time_map = np.arange(window*2)
+            for r in reward_times:
+                temp2 = cell[r-window:r+window]
+                if temp2.shape[0]==window*2:
+                    rate_map.append(temp2)
+                    time_map.append(temp_time_map)
+
+            #
+            ave_map = np.mean(rate_map,0)
+            rate_map = np.hstack(rate_map)
+            time_map = np.hstack(time_map)
+
+            # get information rate and content
+            #print ("rate map: ", rate_map.shape, " time map: ", time_map.shape)
+            inf_rate, inf_content = get_si2(rate_map, time_map)
+            si_rate = inf_rate
+            si = inf_content
+
+            # same but now we shuffle the time map
+            si_shuffle = []
+            ave_map_shuffle = []
+            for _ in range(n_tests):
+                
+                rate_map_shuffled = []
+                time_map_shuffled = []
+                for _ in reward_times:
+                    # get random r value
+                    r = np.random.choice(np.arange(window, cell.shape[0]-window,1))
+
+                    temp2 = cell[r-window:r+window]
+                    if temp2.shape[0]==window*2:
+                        rate_map_shuffled.append(temp2)
+                        time_map_shuffled.append(temp_time_map)
+                    
+                #
+                ave_map_shuffle.append(np.mean(rate_map_shuffled,0))
+                rate_map_shuffled = np.hstack(rate_map_shuffled)
+                time_map_shuffled = np.hstack(time_map_shuffled)
+                
+                #
+                inf_rate, _ = get_si2(rate_map_shuffled, time_map_shuffled)
+                si_shuffle.append(inf_rate)
+
+            #
+            stack = np.hstack([si_rate, si_shuffle])
+            zscore = stats.zscore(stack)[0]
+
+            #
+            # print ("cell: ", k, " of ", cells.shape[0], 
+            #         " si: ", si[k], " si rate: ", si_rate[k], " zscore: ", zscore[k])
+
+            #
+            if plotting:
+                ave_map_shuffle = np.vstack(ave_map_shuffle)
+                plt.figure()
+                plt.plot(ave_map)
+                #
+                temp = np.mean(ave_map_shuffle,0)
+                plt.plot(temp,
+                        linewidth=5,)
+                plt.show()
+
+            # save each cell results
+            np.savez(fname_out,
+                    ave_map = ave_map,
+                    rate_map = rate_map,
+                    time_map = time_map,
+                    si = si,
+                    si_rate = si_rate,
+                    si_shuffle = si_shuffle,
+                    zscore = zscore,
+                    n_bursts = n_bursts)

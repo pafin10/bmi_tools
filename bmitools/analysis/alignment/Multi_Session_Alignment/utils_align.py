@@ -2,6 +2,7 @@
 import yaml
 import copy
 import shutil
+import cv2
 
 # do Math stuff
 import numpy as np
@@ -11,13 +12,14 @@ import pandas as pd
 import parmap
 import networkx as nx
 import sklearn
+import pickle
 
 # Suite2p for TIFF file analysis
 import suite2p
 from suite2p.registration import register
 import shutil
 import psutil
-from tqdm import trange
+from tqdm import trange, tqdm
 
 import matplotlib.pyplot as plt
 from calcium import Calcium
@@ -53,12 +55,13 @@ class Animal2:
                              ):
         
         self.sessions = []
-        for session in self.session_ids:
+        for session in tqdm(self.session_ids):
 
             #
             self.session_id = session
 
             # load Calcium object self.c
+            # this makes object self.c
             recompute_binarization, remove_bad_cells = False, True
             self.load_data(recompute_binarization, 
                             remove_bad_cells)
@@ -83,20 +86,35 @@ class Animal2:
 
             # Also load the rotation files
             if self.c.session_type == "hab" or self.c.session_type == "day0":
-                self.c.yx_shift = [0, 0]
+                self.c.xy_shift = [0, 0]
                 self.c.rot_angle = 0
-                self.c.rot_center_yx = [0, 0]
-                self.c.scale = 1
+                self.c.theta = 0
+                self.c.rot_center_xy = [0, 0]
+                self.c.theta_x, self.c.theta_y = 0, 0
+                self.c.x_shift, self.c.y_shift = 0, 0
+                self.c.scale_x = 1
+                self.c.scale_y = 1
             else:
                 fname_alignment = os.path.join(self.root_dir,
                                                 self.animal_id,
                                                 str(self.session_id),
+                                                'alignment',
                                                 "alignment_parameters.npz")
                 d = np.load(fname_alignment)
-                self.c.yx_shift = [d["y_shift"], d["x_shift"]]  
+                self.c.x_shift, self.c.y_shift = d["x_shift"], d["y_shift"]
                 self.c.rot_angle = d["theta"]                
-                self.c.rot_center_yx = [d["theta_y"], d["theta_x"]]
-                self.c.scale = d["scale_factor"]
+                self.c.theta_x, self.c.theta_y = d["theta_x"], d["theta_y"]
+                self.c.scale_x = d["scale_factor_x"]
+                self.c.scale_y = d["scale_factor_y"]
+                self.c.theta = d["theta"]
+
+                # print ("x_shift: ", self.c.x_shift)
+                # print ("y_shift: ", self.c.y_shift)
+                # print ("theta: ", self.c.theta)
+                # print ("theta_x: ", self.c.theta_x)
+                # print ("theta_y: ", self.c.theta_y)
+                # print ("scale_factor x: ", self.c.scale_x)
+                # print ("scale_factor y: ", self.c.scale_y)
 
             #            
             self.c.session_id = session
@@ -142,15 +160,427 @@ class Animal2:
                                         self.animal_id,
                                         str(self.session_id),
                                         )
+    
+    #
+    def unalign_cell(self,
+                     session,
+                     temp):
+        
+         #    
+        theta = session.theta
+        theta_x, theta_y = session.theta_y, session.theta_x
+        x_shift, y_shift = -session.y_shift, -session.x_shift
+        scale_x, scale_y = 1./session.scale_y, 1./session.scale_x
+    
+        #
+        centre = np.mean(temp, axis=0)
+
+        # scale centres by subtracing from the centre theta_x and theta_y and then scaling by scale_factor
+        xx = (centre[0] - theta_x)*scale_x + theta_x
+        yy = (centre[1] - theta_y)*scale_y + theta_y
+
+        # move the contour from the centre to the new centre
+        temp = temp - centre + np.array([xx, yy])
+
+        #
+        temp = rotate_points(temp, theta_x, theta_y, theta)
+
+        # shift the contour by x_shift and y_shift
+        temp[:,0] = temp[:,0] + x_shift
+        temp[:,1] = temp[:,1] + y_shift
+    
+        # check if any cells are outside 512
+        idx = np.where(temp.flatten()>=512)[0]
+        if len(idx)>0:
+            print ("Cell out of bounds...")
+            return None
+       
+        return temp
+    
+    
+    #
+    def align_cell(self, 
+                   session,
+                   temp):
+
+        #    
+        theta = -session.theta
+        theta_x, theta_y = session.theta_y, session.theta_x
+        x_shift, y_shift = session.y_shift, session.x_shift
+        scale_x, scale_y = session.scale_y, session.scale_x
+    
+        #
+        centre = np.mean(temp, axis=0)
+
+        # scale centres by subtracing from the centre theta_x and theta_y and then scaling by scale_factor
+        xx = (centre[0] - theta_x)*scale_x + theta_x
+        yy = (centre[1] - theta_y)*scale_y + theta_y
+
+        # move the contour from the centre to the new centre
+        temp = temp - centre + np.array([xx, yy])
+
+        #
+        temp = rotate_points(temp, theta_x, theta_y, theta)
+
+        # shift the contour by x_shift and y_shift
+        temp[:,0] = temp[:,0] + x_shift
+        temp[:,1] = temp[:,1] + y_shift
+    
+        # check if any cells are outside 512
+        idx = np.where(temp.flatten()>=512)[0]
+        if len(idx)>0:
+            print ("Cell out of bounds...")
+            return None
+       
+        return temp
 
     #
+    def unalign_stat(self, session, stat):
+
+        #stat = session.stat
+
+        ##############
+        new_stat = []
+        for ctr,cell_stat in enumerate(stat):
+            
+            #
+            temp = np.vstack((cell_stat["xpix"], 
+                              cell_stat["ypix"])).T  
+
+            lam_initial = cell_stat["lam"] 
+
+            #
+            # if ctr==0:
+            #     print ("first cell corods: ", temp)
+
+            #
+            temp = self.unalign_cell(session, 
+                                     temp)
+
+            #
+            if temp is None:
+                continue
+
+            # check if any pixels are >= 512 or <0
+            idx1 = np.where(temp.flatten()>=512)[0]
+            idx2 = np.where(temp.flatten()<0)[0]
+            if len(idx1)>0 or len(idx2)>0:
+
+                # make a dummy cell
+                temp = np.zeros((3,2))
+                temp[:,0] = np.arange(3)
+                temp[:,1] = np.arange(3)
+                
+                lam_initial = np.zeros(3)
+
+            # compute new centre
+            centre = np.mean(temp, axis=0)
+
+            # make a dictionary with 3 entries 'med', 'xpix', 'ypix'
+            cell_local = {}
+            cell_local["med"] = centre
+            cell_local["xpix"] = np.int32(temp[:,0])
+            cell_local["ypix"] = np.int32(temp[:,1])
+            cell_local["lam"] = lam_initial  
+
+            # compute radius 
+            width = np.max(temp[:,0]) - np.min(temp[:,0])
+            height = np.max(temp[:,1]) - np.min(temp[:,1])
+            cell_local['radius'] = (width+height)/2.
+
+            # add the cell to the new stat
+            new_stat.append(cell_local)
+
+
+        #
+        return new_stat
     #
-    def merge_sessions_bmi(self):
+    def align_stat(self, 
+                   session):
+        
+        #
+        stat = session.stat
+
+        ##############
+        new_stat = []
+        for ctr,cell_stat in enumerate(stat):
+            
+            #
+            temp = np.vstack((cell_stat["xpix"], 
+                              cell_stat["ypix"])).T  
+
+            lam_initial = cell_stat["lam"] 
+
+            #
+            # if ctr==0:
+            #     print ("first cell corods: ", temp)
+
+            #
+            temp = self.align_cell(session, temp)
+
+            if temp is None:
+                continue
+
+            # compute new centre
+            centre = np.mean(temp, axis=0)
+
+
+            # make a dictionary with 3 entries 'med', 'xpix', 'ypix'
+            cell_local = {}
+            cell_local["med"] = centre
+            cell_local["xpix"] = temp[:,0]
+            cell_local["ypix"] = temp[:,1]
+            cell_local["lam"] = lam_initial       
+
+            # add the cell to the new stat
+            new_stat.append(cell_local)
+
+
+        #
+        return new_stat
+
+    #
+    def stat_to_contours(self, stat):
+                #
+        # get 'xpix' from stat dictionary
+         #   
+        contours = []         
+        for ctr, cell in enumerate(tqdm(stat)):
+            x_points = cell["xpix"]
+            y_points = cell["ypix"]
+            points = np.int32([x_points, 
+                               y_points]).T
+
+            #
+            img = np.zeros((512, 512), dtype=np.uint8)
+            for k in range(points.shape[0]):
+                img[points[k,0],points[k,1]] = 1
+
+            #
+            hull_points = cv2.findContours(img,cv2.RETR_TREE,cv2.CHAIN_APPROX_NONE)[0][0].squeeze()
+
+            # check for weird single isolated pixel cells
+            if hull_points.shape[0]==2:
+                dists = sklearn.metrics.pairwise_distances(points)
+                idx = np.where(dists==0)
+                dists[idx]=1E3
+                mins = np.min(dists,axis=1)
+
+                # find pixels that are more than 1 pixel away from nearest neighbour
+                idx = np.where(mins>1)[0]
+
+                # delete isoalted points
+                points = np.delete(points, idx, axis=0)
+
+                #
+                img = np.zeros((512, 512), dtype=np.uint8)
+                img[points[:, 0], points[:, 1]] = 1
+                hull_points = cv2.findContours(img,cv2.RETR_TREE,cv2.CHAIN_APPROX_NONE)[0][0].squeeze()
+
+            # add last point but sometimes this breaks because it's an empty cell ...
+            try:
+                hull_points = np.vstack((hull_points, hull_points[0]))
+            except:
+                continue
+
+            #
+            contours.append(hull_points)
+            #cell_array[ctr] = hull_points
+
+        return contours 
+    
+    #
+    def stat_to_footprints(self, stat, dims=[512, 512]):
+        """
+        Converts cell statistics to footprints.
+
+        Parameters:
+        stat (list): List of cell statistics.
+        dims (list): List containing dimensions of the footprints. Default is [512, 512].
+
+        Returns:
+        footprints (numpy array): Array of footprints.
+        """
+        imgs = []
+        for k in range(len(stat)):
+            x = np.int32(stat[k]['xpix'])
+            y = np.int32(stat[k]['ypix'])
+
+            # save footprint
+            img_temp = np.zeros((dims[0], dims[1]))
+            img_temp[x, y] = stat[k]['lam']
+
+            #
+            img_temp_norm = (img_temp - np.min(img_temp)) / (np.max(img_temp) - np.min(img_temp))
+            imgs.append(img_temp_norm)
+
+        footprints = np.array(imgs)
+
+        #
+        return footprints
+    
+    #
+    def merge_stat_bmi(self, 
+                       sessions,
+                       reference_session,
+                       parallel=True):
+        
+        #
+        num_batches = get_num_batches_based_on_available_ram()
+        
+        # grab footprints and stat from reference session
+        master_stat = reference_session.stat
+
+        # master_footprints = self.stat_to_footprints(master_stat)
+        master_contours = self.stat_to_contours(master_stat)
+
+        # save master contours as a dictionary
+        master_contours_dict = {}
+        for k in range(len(master_contours)):
+            master_contours_dict[k] = master_contours[k]
+         
+        # 
+        for session in sessions:
+         
+            #
+            if session.session_type == 'day0':
+                continue
+
+            print("Working on session ...", session.session_id)
+
+            fname_master_stat = os.path.join(self.root_dir,
+                                             self.animal_id,
+                                             str(session.session_id),
+                                             'alignment',
+                                             'master_stat.npy'
+                                             )
+
+            if os.path.exists(fname_master_stat)==False:
+
+                #############################
+                # make alignment directory
+                alignment_dir = os.path.join(self.root_dir,
+                                                self.animal_id,
+                                                str(session.session_id),
+                                                'alignment')
+                
+                if os.path.exists(alignment_dir)==False:
+                    os.mkdir(alignment_dir)
+
+                ###############################
+                # align the session to the master mask based on GUI coords
+                sesssion_stat_aligned = self.align_stat(session)
+
+                ###############################
+                # make contours and save imagines
+                session_contours_aligned = self.stat_to_contours(sesssion_stat_aligned)
+
+                # save aligned contours - should match the GUI contours perfectly
+                title = "pre_deduplication"
+                self.save_mask_in_progress(session,
+                                        session_contours_aligned,
+                                        master_contours,
+                                        title)
+                
+
+                ###############################
+                # make deplication object and run on footprints
+                dd = Deduplicator()
+
+                # converts the cell pixle lists to a cell mask 
+                session_footprints = self.stat_to_footprints(sesssion_stat_aligned)
+                master_footprints = self.stat_to_footprints(master_stat)
+
+                #
+                print ("master footprints", len(master_footprints), 
+                    ", session footprints", len(session_footprints))                            
+
+                #
+                clean_cell_ids, master_footprints = dd.merge_deduplicate_footprints(master_footprints, 
+                                                                                    session_footprints, 
+                                                                                    parallel=parallel, 
+                                                                                    num_batches=num_batches)          
+                
+                ###############################
+                # update master stat 
+                master_stat = np.concatenate([master_stat, 
+                                            sesssion_stat_aligned])[clean_cell_ids]
+
+                # save master_stat 
+                np.save(fname_master_stat, master_stat)
+                
+                ###############################
+                # plot contours 
+                master_contours = self.stat_to_contours(master_stat)
+
+                # save aligned contours - should match the GUI contours perfectly
+                title = "post_deduplication"
+                self.save_mask_in_progress(session,
+                                            session_contours_aligned,
+                                            master_contours,
+                                            title)
+
+                #
+                print ("")
+
+            else:
+                print ("... master stat exists ...")
+                master_stat = np.load(fname_master_stat, allow_pickle=True)
+    
+        #
+        return master_stat
+    
+    #
+    def save_mask_in_progress(self,
+                              session,
+                              session_contours_aligned,
+                              master_contours,
+                              title):
+        
+        # check if 'alginment directory exists
+        alignment_dir = os.path.join(self.root_dir,
+                                    self.animal_id,
+                                     str(session.session_id),
+                                     'alignment')
+        #
+        if os.path.exists(alignment_dir)==False:
+            os.mkdir(alignment_dir)
+        
+        #
+        plt.figure(figsize=(12,12))
+        
+        #
+        text = "session contours aligned to master mask"
+        plot_conts_from_mask(session_contours_aligned,
+                            text, 
+                            0)
+
+        text = "master mask"
+        plot_conts_from_mask(master_contours,
+                            text,
+                            1)
+        plt.title(title+
+                  "\n (the coordinates are in day0 frame of reference)")
+        plt.legend()
+
+        #
+        plt.savefig(os.path.join(self.root_dir,
+                                 self.animal_id,
+                                 str(session.session_id),
+                                 'alignment',
+                                 title +'.png'))  
+        #
+        plt.close()
+        
+    #
+    def make_master_mask(self):
 
         #       
         print ("... merging sessions ...")
 
-        # TODO: autodetect reference_session_id; Should be in the "session_type" field as "day0"
+        ############################################
+        ############## GET MASTER SESSION ##########
+        ############################################
         for k in range(len(self.sessions)):
             if self.sessions[k].session_type=="day0":
                 reference_session = self.sessions[k]
@@ -159,52 +589,153 @@ class Animal2:
         merged_session_dir = os.path.join(self.root_dir, 
                                           self.animal_id,
                                           "merged")
-        print ("... merged session dir: ", merged_session_dir)
-
-        # check if directory exists
         if os.path.exists(merged_session_dir)==False:
-            # make missing directory
             os.mkdir(merged_session_dir)
             
-        # create a master mask by
-        merger = Merger()
-        if self.recompute_master_mask:
+        ############################################
+        ############## COMPUTE MASTER MASK #########
+        ############################################
+        fname_master_mask = os.path.join(merged_session_dir,
+                                            "stat.npy")
+        #
+        if self.recompute_master_mask or os.path.exists(fname_master_mask)==False:
 
             #
             print("Creating master mask...")
-            merged_stat = merger.merge_stat_bmi(self.sessions, 
-                                                reference_session, 
-                                                parallel = True)
+            self.merged_stat = self.merge_stat_bmi(self.sessions, 
+                                                   reference_session, 
+                                                   parallel = True)
             
-            return 
 
             # save the master mask in the animal directory
-            np.save(os.path.join(merged_session_dir, 
-                                 "stat.npy"), 
-                    merged_stat)
+            np.save(fname_master_mask, self.merged_stat)
         #
         else:
-            merged_stat = np.load(os.path.join(merged_session_dir, 
-                                               "stat.npy"), 
-                                                allow_pickle=True)
-            
+            self.merged_stat = np.load(os.path.join(merged_session_dir, 
+                                                    "stat.npy"), 
+                                                        allow_pickle=True)
+             
+
         # make comparison contours for every session
-        merger.save_aligned_contours_images(self)
+       # self.save_aligned_contours_images()
             
         #
-        print(f"Number of cells in master mask: {merged_stat.shape[0]}")
+        print(f"Number of cells in master mask: {self.merged_stat.shape[0]}")
 
-        return
+    #
+    def save_aligned_contours_images(self):
+        
+        # 
+        for session in self.sessions:
+
+            #
+            fname_out = os.path.join(self.root_dir,
+                                    self.animal_id,
+                                    str(session.session_id),
+                                    'plane0',
+                                    'merged',
+                                    'figures',
+                                    'contour_comparison.png')
+
+            # 
+            s1_fname = os.path.join(self.root_dir,
+                                    self.animal_id,
+                                    str(session.session_id),
+                                    'plane0',
+                                    'merged',
+                                    'stat.npy'
+                                    )
+            
+            #
+            s2_fname = os.path.join(self.root_dir,
+                                    self.animal_id,
+                                    str(session.session_id),
+                                    'plane0',
+                                    'stat.npy'
+                                    )
+            
+            #
+            s3_fname = os.path.join(self.root_dir,
+                                    self.animal_id,
+                                    'merged',
+                                    'stat.npy')
+            
+
+            
+            #
+            stat1 = np.load(s1_fname,
+                            allow_pickle=True)
+            stat2 = np.load(s2_fname,
+                            allow_pickle=True)
+            stat3 = np.load(s3_fname,
+                            allow_pickle=True)
+            
+            # call make_
+            make_aligned_contours(fname_out,
+                                        stat1,
+                                        stat2,
+                                        stat3)
+
+    def unrotate_mask(self, session):   
+
+        pass
+
+    #
+    def run_suite2p_master_mask(self):
+
+        # load master mask
+        fname_master_mask = os.path.join(self.root_dir,
+                                            self.animal_id,
+                                            "merged",
+                                            "stat.npy")
+        #
+        self.merged_stat = np.load(fname_master_mask, allow_pickle=True)
+        print ("Loaded master mask: ", len(self.merged_stat))
+
+
+        # get contours from master mask
+        self.merged_contours = self.stat_to_contours(self.merged_stat)
+
         # Update all sessions based on merged mask
+        ctr=0
         for session in self.sessions:
 
             # Redo the suite2p runs for all sessions - including the reference session
             print("Updating session ", session.session_id)
+
+            # get contours from original sesssion
+            session_contours = self.stat_to_contours(session.stat)
             
             # shift and rotate merged mask to correct cell locations
-            # and update suite2p files in session
-            merger.shift_update_session_s2p_files_bmi(session, 
-                                                      merged_stat)
+            self.master_stat_unaligned = self.unalign_stat(session,              # session object
+                                                      self.merged_stat)          # master mask stat
+                                                                                 # note: this code sets out of bounds cells
+                                                                                 #  to very small footprints
+
+            # make contours 
+            self.master_contours_unaligned = self.stat_to_contours(self.master_stat_unaligned)
+
+            # save image of both
+            # save aligned contours - should match the GUI contours perfectly
+            title = "final_mask_vs_original"
+            self.save_mask_in_progress(session,
+                                       session_contours,
+                                       self.master_contours_unaligned,
+                                       title)
+                                                                                    
+            # #
+            update_s2p_files_bmi_standalone(session,
+                                            self.master_stat_unaligned)
+
+            # merger.shift_update_session_s2p_files_bmi(session, 
+            #                                           merged_stat)
+
+            #ctr+=1
+            #if ctr>1:
+            #    break
+
+            #
+            print ('')
 
         print ("...DONE MERGING ....")
 
@@ -253,11 +784,11 @@ class Animal2:
         # - and we also leave all cells in to be able to track them over all sessions
         
         self.c = load_calcium_object(self.root_dir, 
-                                data_dir=self.suite2p_path,
-                                animal_id=self.animal_id, 
-                                session_id=self.session_id, 
-                                recompute_binarization=recompute_binarization, 
-                                remove_bad_cells=remove_bad_cells)
+                                    data_dir=self.suite2p_path,
+                                    animal_id=self.animal_id, 
+                                    session_id=self.session_id, 
+                                    recompute_binarization=recompute_binarization, 
+                                    remove_bad_cells=remove_bad_cells)
         
 
 #
@@ -271,7 +802,7 @@ def load_calcium_object(root_dir,
     
 
     #Init
-    print(f"Getting cabincorr data from {data_dir}")
+   #print(f"Getting cabincorr data from {data_dir}")
 
     #
     c = Calcium(root_dir, animal_id, session_name=session_id, data_dir=data_dir)
@@ -1301,7 +1832,252 @@ class Binary_loader:
                                         repeat_delay=1000)
         ani.save(gif_save_path)
         return ani
+
+class Deduplicator:
+
+    def __init__(self):
+        pass
+
+
+    def merge_deduplicate_footprints(self, footprints1: np.ndarray, footprints2: np.ndarray,
+                                      parallel=True, num_batches=4):
+        """
+        This function merges and deduplicates footprints.
+
+        Parameters:
+        footprints1, footprints2 (numpy arrays): Arrays of footprints to be merged and deduplicated.
+        parallel (bool): If True, use parallel processing. Default is True.
+        num_batches (int): Number of batches for parallel processing. Default is 4.
+
+        Returns:
+        clean_cell_ids (numpy array): Array of clean cell IDs after merging and deduplicating footprints.
+        cleaned_merged_footprints (numpy array): Array of cleaned merged footprints.
+        """
+        #
+        merged_footprints = np.concatenate([footprints1, footprints2])
+        num_cells = len(merged_footprints)
+
+        #
+        df_overlaps = self.generate_batch_cell_overlaps(merged_footprints, 
+                                                        recompute_overlap=True, 
+                                                        parallel=parallel, 
+                                                        num_batches=num_batches)
+        
+        #
+        candidate_neurons = self.find_candidate_neurons_overlaps(df_overlaps, 
+                                                                 corr_array=None, 
+                                                                 deduplication_use_correlations=False, 
+                                                                 corr_max_percent_overlap=0.25, 
+                                                                 corr_threshold=0.3)
+        
+        #
+        G = self.make_correlated_neuron_graph(num_cells, 
+                                              candidate_neurons)
+        
+        #
+        clean_cell_ids = self.delete_duplicate_cells(num_cells, 
+                                                     G)
+        
+        #
+        cleaned_merged_footprints = merged_footprints[clean_cell_ids]
     
+        #
+        return clean_cell_ids, cleaned_merged_footprints
+
+
+    def generate_batch_cell_overlaps(self, footprints, parallel=True, recompute_overlap=False, 
+                                     n_cores=16, num_batches=3):
+        # this computes spatial overlaps between cells; doesn't take into account temporal correlations
+        """
+        Computes spatial overlaps between cells. It doesn't take into account temporal correlations.
+
+        Parameters:
+        footprints : Array of footprints.
+        parallel (bool): If True, use parallel processing. Default is True.
+        recompute_overlap (bool): If True, recompute overlap. Default is False.
+        n_cores (int): Number of cores to use for parallel processing. Default is 16.
+        num_batches (int): Number of batches for parallel processing. Default is 3.
+
+        Returns:
+        df (DataFrame): DataFrame containing overlap information.
+        """
+        print ("... computing cell overlaps ...")
+        
+        num_footprints = footprints.shape[0]
+        num_min_cells_per_process = 10
+        num_parallel_processes = 30 if num_footprints/30>num_min_cells_per_process else int(num_footprints/num_min_cells_per_process)
+        
+        ids = np.array_split(np.arange(num_footprints, dtype="int64"), 
+                             num_parallel_processes)
+
+        if num_batches > num_parallel_processes:
+            num_batches = num_parallel_processes
+
+        #TODO: will results in an error, if np.array_split is used on inhomogeneouse data like ids on Scicore
+        #batches = ids #np.array_split(ids, num_batches) if num_batches!=1 else [ids]
+        results = np.array([])
+        num_cells = 0
+        res = parmap.map(find_overlaps1,
+                        ids,
+                        footprints,
+                        #c.footprints_bin,
+                        pm_processes=16,
+                        pm_pbar=True,
+                        pm_parallel=parallel)
+
+        #        
+        for cell_batch in res:
+            num_cells += len(cell_batch)
+            for cell in cell_batch:
+                results = np.append(results, cell)
+        
+        #
+        results = results.reshape(num_cells, 5)
+        res = [results]
+        df = make_overlap_database(res)
+        return df
+    
+    #
+    def find_candidate_neurons_overlaps(self, df_overlaps: pd.DataFrame, 
+                                        corr_array=None, deduplication_use_correlations=False, 
+                                        corr_max_percent_overlap=0.25, corr_threshold=0.3):
+        """
+        This function finds candidate neurons based on overlaps and correlations.
+        
+        Parameters:
+        df_overlaps (DataFrame): DataFrame containing overlap information.
+        corr_array (numpy array): Array containing correlation information. Default is None.
+        deduplication_use_correlations (bool): If True, use correlations for deduplication. Default is False.
+        corr_max_percent_overlap (float): Maximum percent overlap for correlation. Default is 0.25.
+        corr_threshold (float): Threshold for correlation. Default is 0.3.
+
+        Returns:
+        candidate_neurons (numpy array): Array of candidate neurons based on overlaps and correlations.
+        """
+        dist_corr_matrix = []
+        for index, row in df_overlaps.iterrows():
+            cell1 = int(row['cell1'])
+            cell2 = int(row['cell2'])
+            percent1 = row['percent_cell1']
+            percent2 = row['percent_cell2']
+
+            if deduplication_use_correlations:
+
+                if cell1 < cell2:
+                    corr = corr_array[cell1, cell2, 0]
+                else:
+                    corr = corr_array[cell2, cell1, 0]
+            else:
+                corr = 0
+            dist_corr_matrix.append([cell1, cell2, corr, max(percent1, percent2)])
+        dist_corr_matrix = np.vstack(dist_corr_matrix)
+        #####################################################
+        # check max overlap
+        idx1 = np.where(dist_corr_matrix[:, 3] >= corr_max_percent_overlap)[0]
+        
+        # skipping correlations is not a good idea
+        #   but is a requirement for computing deduplications when correlations data cannot be computed first
+        if deduplication_use_correlations:
+            idx2 = np.where(dist_corr_matrix[idx1, 2] >= corr_threshold)[0]   # note these are zscore thresholds for zscore method
+            idx3 = idx1[idx2]
+        else:
+            idx3 = idx1
+        #
+        candidate_neurons = dist_corr_matrix[idx3][:, :2]
+        return candidate_neurons
+
+    def make_correlated_neuron_graph(self, num_cells: int, candidate_neurons: np.ndarray):
+        """
+        This function creates a graph of correlated neurons.
+
+        Parameters:
+        num_cells (int): Number of cells.
+        candidate_neurons (numpy array): Array of candidate neurons.
+
+        Returns:
+        G (networkx.Graph): Graph of correlated neurons.
+        """
+        adjacency = np.zeros((num_cells, num_cells))
+        for i in candidate_neurons:
+            adjacency[int(i[0]), int(i[1])] = 1
+
+        G = nx.Graph(adjacency)
+        G.remove_nodes_from(list(nx.isolates(G)))
+        return G
+
+    def delete_duplicate_cells(self, num_cells: int, G, corr_delete_method='highest_connected_no_corr'):
+        """
+        This function deletes duplicate cells from the graph.
+
+        Parameters:
+        num_cells (int): Number of cells.
+        G (networkx.Graph): Graph of correlated neurons.
+        corr_delete_method (str): Method to delete duplicate cells. Default is 'highest_connected_no_corr'.
+
+        Returns:
+        clean_cell_ids (numpy array): Array of clean cell IDs after deleting duplicates.
+        """
+        # delete multi node networks
+        #
+        if corr_delete_method=='highest_connected_no_corr':
+            connected_cells, removed_cells = del_highest_connected_nodes_without_corr(G)
+        # 
+        print ("Removed duplicated cells: ", len(removed_cells))
+        clean_cells = np.delete(np.arange(num_cells),
+                                removed_cells)
+
+        #
+        clean_cell_ids = clean_cells
+        removed_cell_ids = removed_cells
+        connected_cell_ids = connected_cells
+        return clean_cell_ids
+
+    #
+    def merge_deduplicate_footprints(self, footprints1: np.ndarray, footprints2: np.ndarray,
+                                      parallel=True, num_batches=4):
+        """
+        This function merges and deduplicates footprints.
+
+        Parameters:
+        footprints1, footprints2 (numpy arrays): Arrays of footprints to be merged and deduplicated.
+        parallel (bool): If True, use parallel processing. Default is True.
+        num_batches (int): Number of batches for parallel processing. Default is 4.
+
+        Returns:
+        clean_cell_ids (numpy array): Array of clean cell IDs after merging and deduplicating footprints.
+        cleaned_merged_footprints (numpy array): Array of cleaned merged footprints.
+        """
+        #
+        merged_footprints = np.concatenate([footprints1, footprints2])
+        num_cells = len(merged_footprints)
+
+        #
+        df_overlaps = self.generate_batch_cell_overlaps(merged_footprints, 
+                                                        recompute_overlap=True, 
+                                                        parallel=parallel, 
+                                                        num_batches=num_batches)
+        
+        #
+        candidate_neurons = self.find_candidate_neurons_overlaps(df_overlaps, 
+                                                                 corr_array=None, 
+                                                                 deduplication_use_correlations=False, 
+                                                                 corr_max_percent_overlap=0.25, 
+                                                                 corr_threshold=0.3)
+        
+        #
+        G = self.make_correlated_neuron_graph(num_cells, 
+                                              candidate_neurons)
+        
+        #
+        clean_cell_ids = self.delete_duplicate_cells(num_cells, 
+                                                     G)
+        
+        #
+        cleaned_merged_footprints = merged_footprints[clean_cell_ids]
+    
+        #
+        return clean_cell_ids, cleaned_merged_footprints
+#
 class Merger:
 
     def create_points_from_stat(self, 
@@ -1685,9 +2461,7 @@ class Merger:
         footprints = imgs
         return footprints
 
-   
-
-
+   #
     def save_aligned_contours_images(self, animal):
         
         # 
@@ -1901,200 +2675,8 @@ class Merger:
     #     #
     #     return intersections
 
-    def generate_batch_cell_overlaps(self, footprints, parallel=True, recompute_overlap=False, 
-                                     n_cores=16, num_batches=3):
-        # this computes spatial overlaps between cells; doesn't take into account temporal correlations
-        """
-        Computes spatial overlaps between cells. It doesn't take into account temporal correlations.
 
-        Parameters:
-        footprints : Array of footprints.
-        parallel (bool): If True, use parallel processing. Default is True.
-        recompute_overlap (bool): If True, recompute overlap. Default is False.
-        n_cores (int): Number of cores to use for parallel processing. Default is 16.
-        num_batches (int): Number of batches for parallel processing. Default is 3.
-
-        Returns:
-        df (DataFrame): DataFrame containing overlap information.
-        """
-        print ("... computing cell overlaps ...")
-        
-        num_footprints = footprints.shape[0]
-        num_min_cells_per_process = 10
-        num_parallel_processes = 30 if num_footprints/30>num_min_cells_per_process else int(num_footprints/num_min_cells_per_process)
-        
-        ids = np.array_split(np.arange(num_footprints, dtype="int64"), 
-                             num_parallel_processes)
-
-        if num_batches > num_parallel_processes:
-            num_batches = num_parallel_processes
-
-        #TODO: will results in an error, if np.array_split is used on inhomogeneouse data like ids on Scicore
-        #batches = ids #np.array_split(ids, num_batches) if num_batches!=1 else [ids]
-        results = np.array([])
-        num_cells = 0
-        res = parmap.map(find_overlaps1,
-                        ids,
-                        footprints,
-                        #c.footprints_bin,
-                        pm_processes=16,
-                        pm_pbar=True,
-                        pm_parallel=parallel)
-
-        #        
-        for cell_batch in res:
-            num_cells += len(cell_batch)
-            for cell in cell_batch:
-                results = np.append(results, cell)
-        
-        #
-        results = results.reshape(num_cells, 5)
-        res = [results]
-        df = make_overlap_database(res)
-        return df
-    
     #
-    def find_candidate_neurons_overlaps(self, df_overlaps: pd.DataFrame, 
-                                        corr_array=None, deduplication_use_correlations=False, 
-                                        corr_max_percent_overlap=0.25, corr_threshold=0.3):
-        """
-        This function finds candidate neurons based on overlaps and correlations.
-        
-        Parameters:
-        df_overlaps (DataFrame): DataFrame containing overlap information.
-        corr_array (numpy array): Array containing correlation information. Default is None.
-        deduplication_use_correlations (bool): If True, use correlations for deduplication. Default is False.
-        corr_max_percent_overlap (float): Maximum percent overlap for correlation. Default is 0.25.
-        corr_threshold (float): Threshold for correlation. Default is 0.3.
-
-        Returns:
-        candidate_neurons (numpy array): Array of candidate neurons based on overlaps and correlations.
-        """
-        dist_corr_matrix = []
-        for index, row in df_overlaps.iterrows():
-            cell1 = int(row['cell1'])
-            cell2 = int(row['cell2'])
-            percent1 = row['percent_cell1']
-            percent2 = row['percent_cell2']
-
-            if deduplication_use_correlations:
-
-                if cell1 < cell2:
-                    corr = corr_array[cell1, cell2, 0]
-                else:
-                    corr = corr_array[cell2, cell1, 0]
-            else:
-                corr = 0
-            dist_corr_matrix.append([cell1, cell2, corr, max(percent1, percent2)])
-        dist_corr_matrix = np.vstack(dist_corr_matrix)
-        #####################################################
-        # check max overlap
-        idx1 = np.where(dist_corr_matrix[:, 3] >= corr_max_percent_overlap)[0]
-        
-        # skipping correlations is not a good idea
-        #   but is a requirement for computing deduplications when correlations data cannot be computed first
-        if deduplication_use_correlations:
-            idx2 = np.where(dist_corr_matrix[idx1, 2] >= corr_threshold)[0]   # note these are zscore thresholds for zscore method
-            idx3 = idx1[idx2]
-        else:
-            idx3 = idx1
-        #
-        candidate_neurons = dist_corr_matrix[idx3][:, :2]
-        return candidate_neurons
-
-    def make_correlated_neuron_graph(self, num_cells: int, candidate_neurons: np.ndarray):
-        """
-        This function creates a graph of correlated neurons.
-
-        Parameters:
-        num_cells (int): Number of cells.
-        candidate_neurons (numpy array): Array of candidate neurons.
-
-        Returns:
-        G (networkx.Graph): Graph of correlated neurons.
-        """
-        adjacency = np.zeros((num_cells, num_cells))
-        for i in candidate_neurons:
-            adjacency[int(i[0]), int(i[1])] = 1
-
-        G = nx.Graph(adjacency)
-        G.remove_nodes_from(list(nx.isolates(G)))
-        return G
-
-    def delete_duplicate_cells(self, num_cells: int, G, corr_delete_method='highest_connected_no_corr'):
-        """
-        This function deletes duplicate cells from the graph.
-
-        Parameters:
-        num_cells (int): Number of cells.
-        G (networkx.Graph): Graph of correlated neurons.
-        corr_delete_method (str): Method to delete duplicate cells. Default is 'highest_connected_no_corr'.
-
-        Returns:
-        clean_cell_ids (numpy array): Array of clean cell IDs after deleting duplicates.
-        """
-        # delete multi node networks
-        #
-        if corr_delete_method=='highest_connected_no_corr':
-            connected_cells, removed_cells = del_highest_connected_nodes_without_corr(G)
-        # 
-        print ("Removed duplicated cells: ", len(removed_cells))
-        clean_cells = np.delete(np.arange(num_cells),
-                                removed_cells)
-
-        #
-        clean_cell_ids = clean_cells
-        removed_cell_ids = removed_cells
-        connected_cell_ids = connected_cells
-        return clean_cell_ids
-
-    def merge_deduplicate_footprints(self, footprints1: np.ndarray, footprints2: np.ndarray,
-                                      parallel=True, num_batches=4):
-        """
-        This function merges and deduplicates footprints.
-
-        Parameters:
-        footprints1, footprints2 (numpy arrays): Arrays of footprints to be merged and deduplicated.
-        parallel (bool): If True, use parallel processing. Default is True.
-        num_batches (int): Number of batches for parallel processing. Default is 4.
-
-        Returns:
-        clean_cell_ids (numpy array): Array of clean cell IDs after merging and deduplicating footprints.
-        cleaned_merged_footprints (numpy array): Array of cleaned merged footprints.
-        """
-        #
-        merged_footprints = np.concatenate([footprints1, footprints2])
-        num_cells = len(merged_footprints)
-
-        #
-        df_overlaps = self.generate_batch_cell_overlaps(merged_footprints, 
-                                                        recompute_overlap=True, 
-                                                        parallel=parallel, 
-                                                        num_batches=num_batches)
-        
-        #
-        candidate_neurons = self.find_candidate_neurons_overlaps(df_overlaps, 
-                                                                 corr_array=None, 
-                                                                 deduplication_use_correlations=False, 
-                                                                 corr_max_percent_overlap=0.25, 
-                                                                 corr_threshold=0.3)
-        
-        #
-        G = self.make_correlated_neuron_graph(num_cells, 
-                                              candidate_neurons)
-        
-        #
-        clean_cell_ids = self.delete_duplicate_cells(num_cells, 
-                                                     G)
-        
-        #
-        cleaned_merged_footprints = merged_footprints[clean_cell_ids]
-    
-        #
-        return clean_cell_ids, cleaned_merged_footprints
-    
-
-
     def shift_update_session_s2p_files_bmi(self, 
                                            session, 
                                            new_stat):
@@ -2404,7 +2986,8 @@ def update_s2p_files_bmi_standalone(c, stat):
     binary_file_path = c.binary_path
     
     #
-    ops = np.load(os.path.join(original_suite2_data_path, "ops.npy"), allow_pickle=True).item()
+    ops = np.load(os.path.join(original_suite2_data_path, 
+                               "ops.npy"), allow_pickle=True).item()
 
     # TODO : add motion correction
 
@@ -2412,7 +2995,9 @@ def update_s2p_files_bmi_standalone(c, stat):
     #
     Lx = ops['Lx']
     Ly = ops['Ly']
-    f_reg = suite2p.io.BinaryFile(Ly, Lx, binary_file_path)
+    f_reg = suite2p.io.BinaryFile(Ly, 
+                                  Lx, 
+                                  binary_file_path)
 
     """# Using these inputs, we will first mimic the stat array made by suite2p
     masks = cellpose_masks['masks']
@@ -2427,14 +3012,20 @@ def update_s2p_files_bmi_standalone(c, stat):
 
     # Feed these values into the wrapper functions
     stat_after_extraction, F, Fneu, F_chan2, Fneu_chan2 = suite2p.extraction_wrapper(stat, 
-                                                                                        f_reg, 
-                                                                                        f_reg_chan2 = None, 
-                                                                                        ops=ops)
+                                                                                     f_reg, 
+                                                                                     f_reg_chan2 = None, 
+                                                                                     ops=ops)
     
     # Do cell classification
-    classfile = suite2p.classification.builtin_classfile
-    iscell = suite2p.classify(stat=stat_after_extraction, 
-                                classfile=classfile)
+    # skip cell classification
+    if False:
+        classfile = suite2p.classification.builtin_classfile
+        iscell = suite2p.classify(stat=stat_after_extraction, 
+                                    classfile=classfile)
+    else:
+        iscell = np.ones((F.shape[0],2))
+    
+
     
     # Apply preprocessing step for deconvolution
     dF = F.copy() - ops['neucoeff']*Fneu
@@ -2448,10 +3039,14 @@ def update_s2p_files_bmi_standalone(c, stat):
                                     )
     
     # Identify spikes
-    spks = suite2p.extraction.oasis(F=dF, 
+    if True:
+        spks = suite2p.extraction.oasis(F=dF, 
                                     batch_size=ops['batch_size'], 
                                     tau=ops['tau'], 
                                     fs=ops['fs'])
+    else:
+        spks =  None
+        print ("skipping oasis spikes extraction")
 
     #
     np.save(os.path.join(merged_suite2_data_path, 'F.npy'), F)
@@ -2560,3 +3155,60 @@ def make_aligned_contours(fname_out,
 
     plt.savefig(fname_out, dpi=300)
     plt.close()
+
+
+# rotate cells             
+def rotate_points(points, cx, cy, theta):
+    # Convert the angle to radians
+    theta = np.radians(theta)
+    
+    # Create a rotation matrix
+    rotation_matrix = np.array([
+        [np.cos(theta), -np.sin(theta)],
+        [np.sin(theta), np.cos(theta)]
+    ])
+    
+    # Create a matrix of points
+    points_matrix = np.column_stack((points[:, 0] - cx, points[:, 1] - cy))
+    
+    # Apply the rotation matrix to the points
+    rotated_points_matrix = np.dot(points_matrix, rotation_matrix.T)
+    
+    # Translate the points back to the original coordinate system
+    rotated_points = rotated_points_matrix + np.array([cx, cy])
+    
+    return rotated_points
+
+#
+def plot_conts_from_fname(fname, text, ctr):
+
+    clrs = ['black','blue','red','green','magenta','cyan','yellow','pink','orange','purple','brown','gray','olive','lime','teal','coral','navy','tan','gold','darkgreen','darkred','darkblue','darkgray','darkorange','darkcyan','darkmagenta',]
+
+
+    with open(fname, 'rb') as f:
+        mask = pickle.load(f)
+
+    #
+    for k in range(len(mask))[:200]:
+        temp = mask[k]
+        if k==1:
+            print (temp.shape)
+        plt.plot(temp[:,0], temp[:,1],
+                 c=clrs[ctr],
+                 label=text if k==0 else "",)
+#
+def plot_conts_from_mask(mask,
+                         text, 
+                         ctr):
+
+    clrs = ['blue','red','black','green','magenta','cyan','yellow','pink','orange','purple','brown','gray','olive','lime','teal','coral','navy','tan','gold','darkgreen','darkred','darkblue','darkgray','darkorange','darkcyan','darkmagenta',]
+
+    #
+    for k in range(len(mask)):#[:200]:
+        temp = mask[k]
+
+        #
+        plt.plot(temp[:,0], temp[:,1],
+                 c=clrs[ctr],
+                 label=text + ": "+str(len(mask)) if k==0 else "",
+                 alpha=.6)

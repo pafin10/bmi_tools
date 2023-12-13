@@ -1050,8 +1050,7 @@ class Calcium():
         #print ("cell: ", cell_id, "  hullpoints: ", hull_points)
         return hull_points
 
-
-
+    #
     def load_footprints(self):
         dims = [512, 512]
 
