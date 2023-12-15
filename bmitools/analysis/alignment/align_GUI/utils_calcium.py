@@ -87,14 +87,6 @@ class ProcessCalcium():
     def load_day0_mask(self):
 
     
-        # fname = os.path.join(
-        #                 self.root_dir,
-        #                 self.animal_id,
-        #                 'day0',
-        #                 'rois_pixels_and_thresholds_day0.npz')
-
-        # find session id with day0 session_type
-
         # find the session type that has 'day0' in it
         idx = np.where(np.array(self.session_types)=='day0')[0]
 
@@ -116,6 +108,13 @@ class ProcessCalcium():
         self.cell_ids = data['cell_ids']
 
         self.contours_ROIs = contours_all_cells[self.cell_ids]
+
+        #
+        self.ensemble1_contours = data['ensemble1_contours']
+        self.ensemble2_contours = data['ensemble2_contours']
+
+        #
+        self.roi_ids = data['cell_ids']
 
     #
     def compute_reward_centered_traces(self):
@@ -194,8 +193,8 @@ class ProcessCalcium():
 
 
         #
-        clrs = ['blue','lightblue','red','pink']
-        clrs2 = ['black','green','magenta','orange']
+        # clrs = ['blue','lightblue','red','pink']
+        # clrs2 = ['black','green','magenta','orange']
 
         # make a viridis based discrete colormap
         import matplotlib.colors as colors
@@ -332,7 +331,7 @@ class ProcessCalcium():
     def plot_reward_centered_traces_ROIs_only(self):
 
         #
-        clrs = ['blue','lightblue','red','pink']
+        #clrs = ['blue','lightblue','red','pink']
         clrs2 = ['black','green','magenta','orange','yellow','cyan','purple','brown']
 
 
@@ -3440,10 +3439,10 @@ class ProcessCalcium():
     #
     def load_data(self):
 
-        #for animal_id in self.animal_ids:
+        # 
         self.sessions = []
+        ctr=0
         for session_ in tqdm(self.session_ids):
-
 
             # make a directory called 'cells' if not already present
             self.cells_dir = os.path.join(self.root_dir,
@@ -3452,7 +3451,7 @@ class ProcessCalcium():
             if not os.path.exists(self.cells_dir):
                 os.makedirs(self.cells_dir)
 
-                
+            #                
             data_dir = os.path.join(
                             self.root_dir,
                             self.animal_id,
@@ -3477,17 +3476,30 @@ class ProcessCalcium():
                 C.percentile_threshold = 0.999999
                 
                 # 
-                print ("loading binarization")
+                #print ("loading binarization")
                 C.load_binarization()
             
             except:
                 print ("could not load session: ", session_)
                 C = None
 
+            # also load the contours from 'rois_pixels_and_contours.npz'
+            if self.session_types[ctr]!='day0':
+                fname = os.path.join(self.root_dir,
+                                        self.animal_id,
+                                        session_,
+                                        'rois_pixels_and_thresholds.npz') 
+                #
+                data = np.load(fname, allow_pickle=True)
+                C.ensemble1_contours = data['ensemble1_contours']
+                C.ensemble2_contours = data['ensemble2_contours']
+
             #
             self.sessions.append(C)
 
-    #
+            #
+            ctr+=1
+    #   
     def plot_session_contours(self, 
                               clr,
                               x_shift=0,
@@ -3498,30 +3510,62 @@ class ProcessCalcium():
                               scale_factor_x = 1,
                               scale_factor_y = 1,
                               ):
+        
+        #
+        dist_thresh = 20
 
         # replotting 
         session_contours = self.sessions[self.session_id].contours
+        day0_contours = self.sessions[0].contours
 
-        if clr=='red':
+        # find centre of all the day0 contours
+        idxs = self.roi_ids
+        day0_centres = []
+        for ctr,k in enumerate(idxs):
+            temp2 = day0_contours[k].copy()
+            temp= temp2.copy()
+            centre_day0 = np.mean(temp,0)
+            day0_centres.append(centre_day0)
+            
+        
+        # all session cells
+        session_idxs = np.arange(len(calcium_object.sessions[calcium_object.session_selected].contours))            
+
+        # if plotting the day0 contours
+        if clr=='black':
             idxs = self.day_cell_idx
             self.master_mask = []
         else:
-            idxs = self.cell_idxs
+            idxs = session_idxs
             self.session_mask = []
 
         #
         print ("# of contours in session contours: ", len(session_contours))
         for k in idxs:
+
+            # if it's an ROI contour we skip it for day0
+            if clr=='black':
+                if k in self.roi_ids:
+                    continue
+
             temp2 = session_contours[k].copy()
             temp= temp2.copy()
-
-            if k==0:
-                print ("first cell coords: ", temp)
-
-            # rescale all contours by this factor but from self.scale_x and self.scale_y as centre
-            # only the centres of the cells shift not the shape of the cells...
-            # get centres of cells
             centre = np.mean(temp,0)
+
+
+
+            # if it's first N cells to plot
+            if k not in self.cell_idxs:
+
+                # compute distance between this cell and all day0 cells
+                dists = []
+                for ctr,centre_day0 in enumerate(day0_centres):
+                    dist = np.sqrt((centre_day0[0]-centre[0])**2 + (centre_day0[1]-centre[1])**2)
+                    dists.append(dist)
+
+                # if smallest dist is < dist_thresh then plot it
+                if np.min(dists)>self.dist_nearby_cells:
+                    continue
 
             # scale centres by subtracing from the centre theta_x and theta_y and then scaling by scale_factor
             xx = (centre[0] - theta_x)*scale_factor_x + theta_x
@@ -3537,7 +3581,7 @@ class ProcessCalcium():
             temp[:,0] = temp[:,0] + x_shift
             temp[:,1] = temp[:,1] + y_shift
 
-            #
+            # 
             self.ax.plot(temp[:,0],
                         temp[:,1],
                         c=clr,
@@ -3547,11 +3591,46 @@ class ProcessCalcium():
                         )
             
             #
-            if clr=='red':
+            if clr=='black':
                 self.master_mask.append(temp)
             else:
                 self.session_mask.append(temp)
-    
+            
+        #
+        if clr=='black':
+            idxs = self.roi_ids
+            clrs = ['blue','mediumslateblue','red','orange']
+            for ctr,k in enumerate(idxs):
+                temp2 = session_contours[k].copy()
+                temp= temp2.copy()
+                centre = np.mean(temp,0)
+
+                # scale centres by subtracing from the centre theta_x and theta_y and then scaling by scale_factor
+                xx = (centre[0] - theta_x)*scale_factor_x + theta_x
+                yy = (centre[1] - theta_y)*scale_factor_y + theta_y
+
+                # move the contour from the centre to the new centre
+                temp = temp - centre + np.array([xx,yy])
+
+                #
+                temp = rotate_points(temp, theta_x, theta_y, theta)
+
+                # shift the contour by x_shift and y_shift
+                temp[:,0] = temp[:,0] + x_shift
+                temp[:,1] = temp[:,1] + y_shift
+
+                # 
+                self.ax.plot(temp[:,0],
+                            temp[:,1],
+                            c=clrs[ctr],
+                            alpha=.75,
+                            linewidth=3,
+                            #label="session: "+str(self.session_id) if k==0 else ""
+                            )
+            
+
+
+            
     #
     def plot_quadrants(self):
 
@@ -3596,13 +3675,13 @@ class ProcessCalcium():
         print ("shifting contours")
         self.x_shift-=1
 
-        clr = 'blue'
+        clr = 'green'
         self.plot_session_contours(clr, 
                                    self.x_shift,
                                    self.y_shift)
 
         #
-        clr = 'red'
+        clr = 'black'
         self.session_id=0
         self.plot_session_contours(clr)
 
@@ -3620,11 +3699,11 @@ class ProcessCalcium():
         plt.subplot(1,1,1)
 
         #
-        clr = 'blue'
+        clr = 'green'
         self.plot_session_contours(clr)
 
         #
-        clr = 'red'
+        clr = 'black'
         self.session_id=0
         self.plot_session_contours(clr)
 
@@ -4193,7 +4272,7 @@ def update_plots(c):
 
     #
     c.session_id = c.session_selected
-    clr= 'blue'
+    clr= 'green'
     c.plot_session_contours(clr, 
                             c.x_shift, 
                             c.y_shift, 
@@ -4205,7 +4284,7 @@ def update_plots(c):
 
     #
     c.session_id = 0
-    clr= 'red'
+    clr= 'black'
     c.plot_session_contours(clr)
 
     #
@@ -4304,6 +4383,7 @@ def reload_alignment(c):
     d = np.load(os.path.join(c.root_dir,
                                 c.animal_id,
                                 c.session_ids[c.session_selected],
+                                'alignment',
                                 'alignment_parameters.npz'),
                 allow_pickle=True)
     
@@ -4331,12 +4411,12 @@ def reload_alignment(c):
 
     #
     c.session_id = 0
-    clr = 'red'
+    clr = 'black'
     c.plot_session_contours(clr)
 
     #
     c.session_id = c.session_selected
-    clr = 'blue'
+    clr = 'green'
     c.plot_session_contours(clr,
                             c.x_shift,
                             c.y_shift,
@@ -4353,6 +4433,7 @@ def reload_alignment(c):
     fname_out = os.path.join(c.root_dir,
                                 c.animal_id,
                                 str(c.session_ids[c.session_selected]),
+                                'alignment',
                                 'GUI_alignment_reloaded.png')
     plt.savefig(fname_out,dpi=300)
 
@@ -4428,25 +4509,15 @@ def align_gui_local(ca_object):
     # make alignment directory
     alignment_dir = os.path.join(calcium_object.root_dir,
                                  calcium_object.animal_id,
-                                 str(calcium_object.session_selected),
+                                 str(calcium_object.session_ids[calcium_object.session_selected]),
                                  'alignment')
 
     if os.path.exists(alignment_dir)==False:
         os.mkdir(alignment_dir)
 
+    ca_object.alignment_dir = alignment_dir
 
-    #
-    # calcium_object.cell_idxs = np.random.choice(len(calcium_object.sessions[calcium_object.session_selected].contours), 
-    #                             size=min(calcium_object.n_cells_show, 
-    #                                         len(calcium_object.sessions[calcium_object.session_selected].contours)), 
-    #                             replace=False)
-    
-    # #
-    # calcium_object.day_cell_idx = np.random.choice(len(calcium_object.sessions[0].contours),
-    #                                     size=min(calcium_object.n_cells_show, 
-    #                                             len(calcium_object.sessions[0].contours)),
-    #                                     replace=False)
-
+    #############################
     calcium_object.cell_idxs = np.arange(0,
                                          min(len(calcium_object.sessions[calcium_object.session_selected].contours),
                                             calcium_object.n_cells_show), 1)
@@ -4472,13 +4543,13 @@ def align_gui_local(ca_object):
 
     #
     calcium_object.session_id = 0
-    clr = 'red'
+    clr = 'black'
     calcium_object.plot_session_contours(clr)
 
     #
     print ("selected session: ", calcium_object.session_ids[calcium_object.session_selected])
     calcium_object.session_id = calcium_object.session_selected
-    clr = 'blue'
+    clr = 'green'
     calcium_object.plot_session_contours(clr)
 
     #

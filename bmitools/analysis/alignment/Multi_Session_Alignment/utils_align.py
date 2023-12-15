@@ -259,12 +259,19 @@ class Animal2:
 
             #
             if temp is None:
-                continue
+                # make a dummy cell
+                print ("making dummy cell for None flag")
+                temp = np.zeros((3,2))
+                temp[:,0] = np.arange(3)
+                temp[:,1] = np.arange(3)
+                
+                lam_initial = np.zeros(3)
 
             # check if any pixels are >= 512 or <0
             idx1 = np.where(temp.flatten()>=512)[0]
             idx2 = np.where(temp.flatten()<0)[0]
             if len(idx1)>0 or len(idx2)>0:
+                print ("making dummy cell for out of bounds cells")
 
                 # make a dummy cell
                 temp = np.zeros((3,2))
@@ -725,14 +732,8 @@ class Animal2:
                                                                                     
             # #
             update_s2p_files_bmi_standalone(session,
-                                            self.master_stat_unaligned)
-
-            # merger.shift_update_session_s2p_files_bmi(session, 
-            #                                           merged_stat)
-
-            #ctr+=1
-            #if ctr>1:
-            #    break
+                                            self.master_stat_unaligned,
+                                            self.recompute_suite2p)
 
             #
             print ('')
@@ -2969,15 +2970,22 @@ def del_highest_connected_nodes(nn, c):
 
 
 #
-def update_s2p_files_bmi_standalone(c, stat):
+def update_s2p_files_bmi_standalone(c, stat,
+                                    recompute_suite2p=False):
 
-    # c is the calcium object, should have all the details
-
+    
 
     # Read in existing data from a suite2p run. We will use the "ops" and registered binary.
     merged_suite2_data_path = os.path.join(c.suite2p_path,'merged')
     original_suite2_data_path = c.suite2p_path
 
+# c is the calcium object, should have all the details
+    fname_F = os.path.join(merged_suite2_data_path, 'F.npy')
+
+    if os.path.isfile(fname_F) and recompute_suite2p==False:
+        print ("F.npy already exists, skipping suite2p extraction")
+        return
+    
     # check to see if the suite2p data path is already a directory
     if os.path.isdir(merged_suite2_data_path)==False:
         os.mkdir(merged_suite2_data_path)
@@ -2997,7 +3005,8 @@ def update_s2p_files_bmi_standalone(c, stat):
     Ly = ops['Ly']
     f_reg = suite2p.io.BinaryFile(Ly, 
                                   Lx, 
-                                  binary_file_path)
+                                  binary_file_path,
+                                  n_frames=90000)
 
     """# Using these inputs, we will first mimic the stat array made by suite2p
     masks = cellpose_masks['masks']
@@ -3049,6 +3058,7 @@ def update_s2p_files_bmi_standalone(c, stat):
         print ("skipping oasis spikes extraction")
 
     #
+    
     np.save(os.path.join(merged_suite2_data_path, 'F.npy'), F)
     np.save(os.path.join(merged_suite2_data_path, 'Fneu.npy'), Fneu)
     np.save(os.path.join(merged_suite2_data_path, 'iscell.npy'), iscell)

@@ -130,24 +130,24 @@ class ProcessCalcium():
         if self.shuffle_data:
             rasters, rasters_DFF = self.shuffle_rasters(rasters, rasters_DFF)
 
-        # if we subselect for moving periods only using wheel data velcoity
-        wheel_flag = False
+        # # if we subselect for moving periods only using wheel data velcoity
+        # wheel_flag = False
         
-        # select moving
-        text = 'all_states'
-        if self.subselect_moving_only and wheel_flag:
-            rasters = rasters[:, self.idx_run]
-            rasters_DFF = rasters_DFF[:, self.idx_run]
+        # # select moving
+        # text = 'all_states'
+        # if self.subselect_moving_only and wheel_flag:
+        #     rasters = rasters[:, self.idx_run]
+        #     rasters_DFF = rasters_DFF[:, self.idx_run]
 
-            # add moving flag to filenames
-            text = 'moving'
+        #     # add moving flag to filenames
+        #     text = 'moving'
 
-        elif self.subselect_quiescent_only and wheel_flag:
-            rasters = rasters[:, self.idx_quiescent]
-            rasters_DFF = rasters_DFF[:, self.idx_quiescent]
+        # elif self.subselect_quiescent_only and wheel_flag:
+        #     rasters = rasters[:, self.idx_quiescent]
+        #     rasters_DFF = rasters_DFF[:, self.idx_quiescent]
 
-            # add moving flag to filenames
-            text = 'quiescent'
+        #     # add moving flag to filenames
+        #     text = 'quiescent'
 
         
 
@@ -3467,6 +3467,8 @@ class ProcessCalcium():
 
             #
             session_name = str(session_name)
+
+            print ("processing session: ", session_name)
         
             # make an fname_out directory if not already present
             self.fname_out = os.path.join(self.root_dir,
@@ -3495,13 +3497,50 @@ class ProcessCalcium():
                 #print ("# of rewards: ", self.n_rewards, " rewar[:100])
 
                 # Load the workbook
-                wb = load_workbook(os.path.join(self.root_dir,
+                fname_workbook = os.path.join(self.root_dir,
                                                 self.animal_id,
                                                 session_name,
-                                                'results.xlsx'), read_only=False)
+                                                'results.xlsx')
+                wb = load_workbook(fname_workbook, read_only=False)
 
                 # Access the worksheet
                 ws = wb[wb.sheetnames[0]]  # assuming you want the first sheet, change as needed
+
+                # check the # of columns in ws
+                n_cols = ws.max_column
+                if n_cols<7:
+                    print (" session has only ", n_cols)
+                    print (" ... adding tone_state")
+                    
+                    #
+                    ws.insert_cols(idx=7)
+                    ws.cell(row=1, column=7).value = 'tone_state'
+                    # insert 0s in all rows of column 7
+                    for k in range(2,ws.max_row+1):
+                        ws.cell(row=k, column=7).value = 0
+                    
+                    print (" ... adding ensemble_state")
+                    # same for 'ensemble_state'
+                    ws.insert_cols(idx=8)
+                    ws.cell(row=1, column=8).value = 'ensemble_state'
+                    # insert 0s in all rows of column 8
+                    for k in range(2,ws.max_row+1):
+                        ws.cell(row=k, column=8).value = 0
+
+                    # same for 'reward_state'
+                    print (" ... adding reward_state")
+                    ws.insert_cols(idx=9)
+                    ws.cell(row=1, column=9).value = 'reward_state'
+                    # insert 0s in all rows of column 9
+                    for k in range(2,ws.max_row+1):
+                        ws.cell(row=k, column=9).value = 0
+
+                    # overwrite the spreadsheet
+                    wb.save(fname_workbook)
+
+                    # reload the workbook
+                    wb = load_workbook(fname_workbook, read_only=False)                       
+
 
                 # get white noise state  
                 rows = [4,7,8,9]          # white_noise, tone_state, ensemble_state, reward_state
@@ -5284,27 +5323,26 @@ def compute_correlations_parallel(data_dir,
     # split data
     #ids = np.array_split(np.arange(rasters.shape[0]),100)
     # for correlations_parallel2 function we don't need to split ids anymore
-    ids = np.arange(rasters.shape[0])
 
     # make output directory 'correlations'
     # check to see if data_dir exists:
-    if os.path.exists(data_dir)==False:
-        os.mkdir(data_dir)
+    # if os.path.exists(data_dir)==False:
+    #     os.mkdir(data_dir)
 
     # add dynamic data_dir
-    if zscore:
-        data_dir = os.path.join(data_dir,'zscore')
-        if os.path.exists(data_dir)==False:
-            os.mkdir(data_dir)
-    else:
-        data_dir = os.path.join(data_dir,'threshold')
-        if os.path.exists(data_dir)==False:
-            os.mkdir(data_dir)
+    # if zscore:
+    #     data_dir = os.path.join(data_dir,'zscore')
+    #     if os.path.exists(data_dir)==False:
+    #         os.mkdir(data_dir)
+    # else:
+    #     data_dir = os.path.join(data_dir,'threshold')
+    #     if os.path.exists(data_dir)==False:
+    #         os.mkdir(data_dir)
 
-    # finally add the 'correlations' directory
-    data_dir = os.path.join(data_dir,'correlations')
-    if os.path.exists(data_dir)==False:
-        os.mkdir(data_dir)
+    # # finally add the 'correlations' directory
+    # data_dir = os.path.join(data_dir,'correlations')
+    # if os.path.exists(data_dir)==False:
+    #     os.mkdir(data_dir)
 
     #
     c1.data_dir = data_dir
@@ -5316,6 +5354,7 @@ def compute_correlations_parallel(data_dir,
     #############################################################
     #############################################################
     # run parallel
+    ids = np.arange(rasters.shape[0])
     if corr_parallel_flag:
         parmap.map(correlations_parallel2,
                     ids,
@@ -5485,24 +5524,28 @@ def get_corr2(temp1, temp2, zscore, n_tests=1000, min_number_bursts=0):
 
     return corr_original, corr_z
 
-
+#
 def get_si2(rate_map,
             time_map):
+    
+    #
+    sparsity = None
+    selectivity = None
     
     #
     duration = np.ma.sum(time_map)
     position_PDF = time_map / (duration + np.spacing(1))
 
     mean_rate = np.ma.sum(rate_map * position_PDF)
-    #mean_rate_sq = np.ma.sum(np.ma.power(rate_map, 2) * position_PDF)
+    mean_rate_sq = np.ma.sum(np.ma.power(rate_map, 2) * position_PDF)
 
-    #max_rate = np.max(rate_map)
+    max_rate = np.max(rate_map)
 
-    #if mean_rate_sq != 0:
-    #    sparsity = mean_rate * mean_rate / mean_rate_sq
+    if mean_rate_sq != 0:
+        sparsity = mean_rate * mean_rate / mean_rate_sq
 
-    #if mean_rate != 0:
-    #selectivity = max_rate / mean_rate
+    if mean_rate != 0:
+        selectivity = max_rate / mean_rate
 
     log_argument = rate_map / (mean_rate+0.00001)
     log_argument[log_argument < 1] = 1
@@ -5511,11 +5554,11 @@ def get_si2(rate_map,
     inf_rate = np.ma.sum(position_PDF * rate_map * np.ma.log2(log_argument))
     inf_content = inf_rate / (mean_rate+0.00001)
 
-    return inf_rate, inf_content
+    return inf_rate, inf_content, sparsity, selectivity
 
 #
 def compute_si_1D(cell_ids,
-                  cells,           # this is the calcium activivty in the session
+                  cells_upphase,           # this is the calcium activivty in the session
                   reward_times,
                   root_dir,
                   animal_id,
@@ -5547,31 +5590,32 @@ def compute_si_1D(cell_ids,
             psth_shuffled.append([])
 
             # [ca] activity
-            cell = cells[k]
+            cell_upphase = cells_upphase[k]
 
             # count the number of bursts in temp
-            diff = cell[1:]-cell[:-1]
+            diff = cell_upphase[1:]-cell_upphase[:-1]
             idx = np.where(diff==1)[0]
             n_bursts.append(idx.shape[0])
 
             # So time map should just count over and over again 
             time_map = []
             rate_map = []
-            temp_time_map = np.arange(window*2)
+            time_map = np.arange(window*2)*reward_times.shape[0]
             for r in reward_times:
-                temp2 = cell[r-window:r+window]
+                temp2 = cell_upphase[r-window:r+window]
                 if temp2.shape[0]==window*2:
                     rate_map.append(temp2)
-                    time_map.append(temp_time_map)
+                    #time_map.append(temp_time_map)
 
             #
+            sum_map = np.sum(rate_map,0)
             ave_map = np.mean(rate_map,0)
-            rate_map = np.hstack(rate_map)
-            time_map = np.hstack(time_map)
+            rate_map = np.sum(rate_map,0)
+            #time_map = temp
 
             # get information rate and content
             #print ("rate map: ", rate_map.shape, " time map: ", time_map.shape)
-            inf_rate, inf_content = get_si2(rate_map, time_map)
+            inf_rate, inf_content, sparsity, selectivity = get_si2(rate_map, time_map)
             si_rate = inf_rate
             si = inf_content
 
@@ -5584,20 +5628,20 @@ def compute_si_1D(cell_ids,
                 time_map_shuffled = []
                 for _ in reward_times:
                     # get random r value
-                    r = np.random.choice(np.arange(window, cell.shape[0]-window,1))
+                    r = np.random.choice(np.arange(window, cell_upphase.shape[0]-window,1))
 
-                    temp2 = cell[r-window:r+window]
+                    temp2 = cell_upphase[r-window:r+window]
                     if temp2.shape[0]==window*2:
                         rate_map_shuffled.append(temp2)
-                        time_map_shuffled.append(temp_time_map)
+                        #time_map_shuffled.append(temp_time_map)
                     
                 #
                 ave_map_shuffle.append(np.mean(rate_map_shuffled,0))
-                rate_map_shuffled = np.hstack(rate_map_shuffled)
-                time_map_shuffled = np.hstack(time_map_shuffled)
+                rate_map_shuffled = np.sum(rate_map_shuffled,0)
+                #time_map_shuffled = np.hstack(time_map_shuffled)
                 
                 #
-                inf_rate, _ = get_si2(rate_map_shuffled, time_map_shuffled)
+                inf_rate, _, _, _= get_si2(rate_map_shuffled, time_map)
                 si_shuffle.append(inf_rate)
 
             #
@@ -5621,11 +5665,16 @@ def compute_si_1D(cell_ids,
 
             # save each cell results
             np.savez(fname_out,
-                    ave_map = ave_map,
-                    rate_map = rate_map,
-                    time_map = time_map,
-                    si = si,
-                    si_rate = si_rate,
-                    si_shuffle = si_shuffle,
-                    zscore = zscore,
-                    n_bursts = n_bursts)
+                     reward_times = reward_times,
+                     sum_map = sum_map,
+                     ave_map = ave_map,
+                     ave_map_shuffle = ave_map_shuffle,
+                     rate_map = rate_map,
+                     time_map = time_map,
+                     si = si,
+                     si_rate = si_rate,
+                     sparsity = sparsity,
+                     selectivity = selectivity,
+                     si_shuffle = si_shuffle,
+                     zscore = zscore,
+                     n_bursts = n_bursts)
