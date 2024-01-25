@@ -19,6 +19,7 @@ from scipy.signal import savgol_filter
 from scipy.signal import butter, sosfilt
 from scipy import stats
 import pickle
+import dill
 
 #
 import binarize2pcalcium.binarize2pcalcium as binca
@@ -48,17 +49,23 @@ class ProcessCalcium():
         #
         self.fps = 30
 
+
         #
         self.root_dir = root_dir
         self.animal_id = animal_id
         
+        #
+        self.fname_animal = os.path.join(self.root_dir,
+                                    self.animal_id,
+                                    self.animal_id+'.dill')
+        
         # load yaml file
-        fname = os.path.join(self.root_dir,
+        self.fname_yaml = os.path.join(self.root_dir,
                             self.animal_id,
                             animal_id+'.yaml')
         
         # load yaml file
-        with open(fname) as file:
+        with open(self.fname_yaml) as file:
             doc = yaml.load(file, Loader=yaml.FullLoader)
 
         #
@@ -66,6 +73,7 @@ class ProcessCalcium():
         self.dob = doc['dob']
         self.animal_name = doc['name']
         self.sex = doc['sex']
+        self.rec_type = doc['rec_type']
 
         #
         self.session_ids = doc['session_ids']
@@ -82,6 +90,24 @@ class ProcessCalcium():
 
         #
         self.clrs=['blue','lightblue','red','pink']
+
+    def save_animal(self):
+        #
+        import dill
+
+        #
+        with open(self.fname_animal, 'wb') as file:
+            dill.dump(self, file)
+
+    def load_animal(self):
+        
+        #
+        print ("...loading animal from disk...")
+        #
+        with open(self.fname_animal, 'rb') as file:
+            a = dill.load(file)
+
+        return a
 
     #
     def make_correlation_dirs(self):
@@ -3487,20 +3513,30 @@ class ProcessCalcium():
                                         'results.npz')
                 
                 #
-                results = np.load(fname, allow_pickle=True)
-                rewards = results['reward_times'].T
-                idx = np.where(rewards[:,1]>0)[0]
+                try:
+                    results = np.load(fname, allow_pickle=True)
+                    rewards = results['reward_times'].T
+                    idx = np.where(rewards[:,1]>0)[0]
 
-                #
-                self.n_rewards = idx.shape[0]
-                reward_times = rewards[idx,1]
+                    #
+                    self.n_rewards = idx.shape[0]
+                    reward_times = rewards[idx,1]
+                except:
+                    print ("couldn't load restuls.npz file...")    
+
                 #print ("# of rewards: ", self.n_rewards, " rewar[:100])
 
+
+                ##############################################################
+                ##############################################################
+                ##############################################################
                 # Load the workbook
                 fname_workbook = os.path.join(self.root_dir,
                                                 self.animal_id,
                                                 session_name,
                                                 'results.xlsx')
+                
+                #
                 wb = load_workbook(fname_workbook, read_only=False)
 
                 # Access the worksheet
@@ -3508,114 +3544,65 @@ class ProcessCalcium():
 
                 # check the # of columns in ws
                 n_cols = ws.max_column
+
+                #
                 if n_cols<7:
-                    print (" session has only ", n_cols)
-                    print (" ... adding tone_state")
-                    
-                    #
-                    ws.insert_cols(idx=7)
-                    ws.cell(row=1, column=7).value = 'tone_state'
-                    # insert 0s in all rows of column 7
-                    for k in range(2,ws.max_row+1):
-                        ws.cell(row=k, column=7).value = 0
-                    
-                    print (" ... adding ensemble_state")
-                    # same for 'ensemble_state'
-                    ws.insert_cols(idx=8)
-                    ws.cell(row=1, column=8).value = 'ensemble_state'
-                    # insert 0s in all rows of column 8
-                    for k in range(2,ws.max_row+1):
-                        ws.cell(row=k, column=8).value = 0
 
-                    # same for 'reward_state'
-                    print (" ... adding reward_state")
-                    ws.insert_cols(idx=9)
-                    ws.cell(row=1, column=9).value = 'reward_state'
-                    # insert 0s in all rows of column 9
-                    for k in range(2,ws.max_row+1):
-                        ws.cell(row=k, column=9).value = 0
-
-                    # overwrite the spreadsheet
-                    wb.save(fname_workbook)
+                     #
+                    self.add_missing_columns(wb,
+                                             ws,
+                                             fname_workbook)
 
                     # reload the workbook
-                    wb = load_workbook(fname_workbook, read_only=False)                       
-
-
+                    wb = load_workbook(fname_workbook, read_only=False)
+                    ws = wb[wb.sheetnames[0]]  # assuming you want the first sheet, change as needed
+                
+                # save the 4th and 9th columns
                 # get white noise state  
-                rows = [4,7,8,9]          # white_noise, tone_state, ensemble_state, reward_state
+                rows = [6,4,5,7,8,9]          # white_noise, tone_state, ensemble_state, reward_state
+                self.reward_lockout_counter = []
                 self.white_noise_state = []
                 self.tone_state = []
                 self.ensemble_state = []
                 self.reward_state = []
+                self.post_reward_state = []
                 for row in ws.iter_rows(min_row=2,values_only=False):
-                    self.white_noise_state.append(row[rows[0]-1].value)
-                    self.tone_state.append(row[rows[1]-1].value)
-                    self.ensemble_state.append(row[rows[2]-1].value)
-                    self.reward_state.append(row[rows[3]-1].value)
+                    self.reward_lockout_counter.append(row[rows[0]-1].value)
+                    self.white_noise_state.append(row[rows[1]-1].value)
+                    self.post_reward_state.append(row[rows[2]-1].value)
+                    self.tone_state.append(row[rows[3]-1].value)
+                    self.ensemble_state.append(row[rows[4]-1].value)
+                    self.reward_state.append(row[rows[5]-1].value)
 
                 # make all lists into arrays
+                self.reward_lockout_counter = np.array(self.reward_lockout_counter)
                 self.white_noise_state = np.array(self.white_noise_state)
+                self.post_reward_state = np.array(self.post_reward_state)
                 self.tone_state = np.array(self.tone_state)
                 self.ensemble_state = np.array(self.ensemble_state)
                 self.reward_state = np.array(self.reward_state)
-
-                ############################################################
-                ####################### COMPUTE TRIALS #####################
-                ############################################################
-                # compute the trial starts and ends using the tone and reward state information
-                trials = []
-                start = 0
-                trial_ended = False
-                trial_started = True
-
-                # loop over all entries in the spreadsheet
-                for k in range(self.reward_state.shape[0]):
-                    
-                    # find next reward and save it
-                    if self.reward_state[k]==1 and trial_ended==False and trial_started:
-                        trial_ended = True        # this indicates that a reward was previusly given
-                        trial_started = False
-                        end = k
-                        trials.append([start,end,1])  # triple indicating start,end and whether reward was given
-
-                    # same but checking if white_noise state was reached
-                    if self.white_noise_state[k]==1 and trial_ended==False and trial_started:
-                        trial_ended = True
-                        trial_started = False
-                        end = k
-                        trials.append([start,end,0])
-                    
-                    # SEARCH FOR THE NEXT TRIAL START
-                    # find the next trial start
-                    if trial_ended==True:         # check if a reward for the previous trial was already given
-                        
-                        # check if we're out of the reward state and also out of the white noise state
-                        if self.reward_state[k]==0 and self.white_noise_state[k]==0:
-
-                            # check to see if tone is back online and is playing an actualy tone after dynamic lockouts
-                            #if self.tone_state[k]>100:
-                            if np.all(self.tone_state[k:k+10]>100):   # this check that we've escaped the dynamic lockout
-                                                                      # at least for several frames as the tone update can sometimes lag behind the penalty/lockouts for a few frames ( due to computer? not sure)
-                                trial_ended = False       # reset the trial start
-                                trial_started = True
-                                start = k
+            
+                #
+                trials = get_trials2(self.white_noise_state,
+                                     self.post_reward_state,
+                                     self.reward_lockout_counter)
                 
                 #
-                trials = np.array(trials)
-                print ("# of trials: ", trials.shape[0],
-                       "# of rewarded trials: ", np.where(trials[:,2]==1)[0].shape[0])
                 idx = np.where(trials[:,2]==1)[0]
-
+                
                 # check if 2 arrays are identical: reward_times and trials[idx][:,1]
-                if np.array_equal(reward_times, trials[idx][:,1])==False:
-                    print ("reward_times and trials[idx][:,1] are not identical")
-                    print ("reward_times: ", reward_times)
-                    print ("trials[idx][:,1]: ", trials[idx][:,1])
-                    print ("Exiting...")
-                    return
-                else:
-                    print ("reward_times detected correctly")
+                # first check if reward_times exists as a variable
+                if 'reward_times' in locals():
+                    if np.array_equal(reward_times, trials[idx][:,1])==False:
+                        print ("reward_times and trials[idx][:,1] are not identical")
+                        print ("reward_times: ", reward_times)
+                        print ("trials[idx][:,1]: ", trials[idx])
+                        print ("assigning reward_times to trials[idx][:,1]")
+                        trials = np.zeros((self.reward_state.shape[0],2),dtype=np.int32)
+                        trials[:,0] = reward_times
+                        trials[:,1] = reward_times+60
+                    else:
+                        print ("reward_times detected correctly")
 
                 # convert trial structure to an array
                 trial = np.zeros((self.reward_state.shape[0]), dtype=np.int32)+ 1000
@@ -3658,6 +3645,41 @@ class ProcessCalcium():
             # exit after processing the 1st session for now
         print ("...done...")
             #break
+
+    def add_missing_columns(self,
+                            wb,
+                            ws,
+                            fname_workbook):
+        #print (" session has only # cols", n_cols)
+        print (" ... adding BLANK tone_state")
+        
+        #
+        ws.insert_cols(idx=7)
+        ws.cell(row=1, column=7).value = 'tone_state'
+        # insert 0s in all rows of column 7
+        for k in range(2,ws.max_row+1):
+            ws.cell(row=k, column=7).value = 0
+        
+        print (" ... adding BLANK ensemble_state")
+        # same for 'ensemble_state'
+        ws.insert_cols(idx=8)
+        ws.cell(row=1, column=8).value = 'ensemble_state'
+        # insert 0s in all rows of column 8
+        for k in range(2,ws.max_row+1):
+            ws.cell(row=k, column=8).value = 0
+
+        # same for 'reward_state'
+        print (" ... adding COPY OF post_reward_state as reward_state")
+        ws.insert_cols(idx=9)
+        ws.cell(row=1, column=9).value = 'reward_state'
+
+        # the fourth column data is the post_reward_state
+        # insert 0s in all rows of column 9
+        for k in range(2,ws.max_row+1):
+            ws.cell(row=k, column=9).value = ws.cell(row=k, column=4).value
+
+        # overwrite the spreadsheet
+        wb.save(fname_workbook)
 
     #
     def binarize_ensemble_state_multi(self):
@@ -3871,9 +3893,6 @@ class ProcessCalcium():
         #
         if self.thresh.shape[0] < 90000:
                     
-            # 
-            print ("Found short spreadsheet: ", self.thresh.shape[0], " entries... fixing it...")
-
             #
             df = df.reindex(range(90000))
 
@@ -3904,7 +3923,7 @@ class ProcessCalcium():
             df.to_excel(os.path.join(
                         self.root_dir,
                         self.animal_id,
-                        self.session_ids[self.session_id],
+                        str(self.session_ids[self.session_id]),
                         'results_fixed.xlsx'), 
                     index=False)
 
@@ -3912,7 +3931,7 @@ class ProcessCalcium():
             df = pd.read_excel(os.path.join(
                         self.root_dir,
                         self.animal_id,
-                        self.session_ids[self.session_id],
+                        str(self.session_ids[self.session_id]),
                         'results_fixed.xlsx'))
 
         return df
@@ -3932,7 +3951,12 @@ class ProcessCalcium():
         self.trials = df.loc[:, 'trials'].values
 
         #
-        self.water_reward = df.loc[:, 'water_reward'].values
+        try:
+            self.water_reward = df.loc[:, 'water_reward'].values
+        except:
+            print( "Missing water_reward column in spreadsheet... using 'reward_state ' instead ")
+            self.water_reward = df.loc[:, 'reward_state'].values
+
 
         # same for trial_rewarded
         self.trials_rewards = df.loc[:, 'trial_rewarded'].values
@@ -3955,7 +3979,7 @@ class ProcessCalcium():
         self.trials_rewards_all = []
         self.e_state_all = []
 
-        # load data from spreassheetds
+        # load data from spreasheets
         for session_id in trange(len(self.sessions)):
             #
             self.session_id = session_id
@@ -3965,15 +3989,15 @@ class ProcessCalcium():
                 continue
 
             #
-            fname_in = os.path.join(
-                                self.root_dir,
-                                self.animal_id,
-                                str(self.session_ids[session_id]),
-                                'results_fixed.pkl')
+            fname_pkl = os.path.join(
+                                    self.root_dir,
+                                    self.animal_id,
+                                    str(self.session_ids[session_id]),
+                                    'results_fixed.pkl')
 
             #            
-            if os.path.exists(fname_in):
-                with open(fname_in, 'rb') as f:
+            if os.path.exists(fname_pkl):
+                with open(fname_pkl, 'rb') as f:
                     df = pickle.load(f)
             else:
                 df = pd.read_excel(os.path.join(
@@ -3981,16 +4005,17 @@ class ProcessCalcium():
                                     self.animal_id,
                                     str(self.session_ids[session_id]),
                                     'results_fixed.xlsx'))
-                # save the dataframe as a pickle file
-                with open(fname_in, 'wb') as f:
-                    pickle.dump(df, f)
-
+                
             #
             self.load_spreadsheet_entries(df)
 
             # this function adds rows to the df and updates all other vals, and resaves df to disk
             if self.fix_spreadsheet_missing_vals:
-                df = self.extend_spreadsheet(df)               
+                df = self.extend_spreadsheet(df)      
+
+            # save the dataframe as a pickle file
+            with open(fname_pkl, 'wb') as f:
+                pickle.dump(df, f)         
             
             # append the loaded data to some lists somewhere
             self.append_data_to_session()
@@ -4006,95 +4031,96 @@ class ProcessCalcium():
         self.sessions[self.session_id].trials_rewards = self.trials_rewards
         self.sessions[self.session_id].e_state = self.e_state
 
-    #   
-    def load_spreadsheet(self):
+    # #   
+    # def load_spreadsheet(self):
 
-        # load data from spreassheetds
-        df = pd.read_excel(os.path.join(
-                            self.root_dir,
-                            self.animal_id,
-                            self.session_ids[self.session_id],
-                            'results_fixed.xlsx'))
+    #     # load data from spreassheetds
+    #     df = pd.read_excel(os.path.join(
+    #                         self.root_dir,
+    #                         self.animal_id,
+    #                         self.session_ids[self.session_id],
+    #                         'results_fixed.xlsx'))
 
-        # find a column in the dataframe with the name "current_high_threshold"
-        # and get its values as a numpy array
-        self.thresh = df.loc[:, 'current_high_threshold'].values
+    #     # find a column in the dataframe with the name "current_high_threshold"
+    #     # and get its values as a numpy array
+    #     self.thresh = df.loc[:, 'current_high_threshold'].values
 
-        if self.fix_spreadsheet_missing_vals:
-            if self.thresh.shape[0] < 90000:
+    #     if self.fix_spreadsheet_missing_vals:
+    #         if self.thresh.shape[0] < 90000:
                 
-                # 
-                print ("Found short spreadsheet: ", self.thresh.shape[0], " entries... fixing it...")
+    #             # 
+    #             print ("Found short spreadsheet: ", self.thresh.shape[0], " entries... fixing it...")
+    #             #print ("Filename is: "
 
-                #
-                df = df.reindex(range(90000))
+    #             #
+    #             df = df.reindex(range(90000))
 
-                # 1. Identify the last non-NaN entry in each column
-                last_entries = df.apply(lambda col: col[col.last_valid_index()])
-                print ("... repeating last_entries: ", last_entries)
-                # 2. Fill the NaN values in the extended rows with the last entry
-                for column in df.columns:
-                    df[column].fillna(last_entries[column], inplace=True)
+    #             # 1. Identify the last non-NaN entry in each column
+    #             last_entries = df.apply(lambda col: col[col.last_valid_index()])
+    #             print ("... repeating last_entries: ", last_entries)
+    #             # 2. Fill the NaN values in the extended rows with the last entry
+    #             for column in df.columns:
+    #                 df[column].fillna(last_entries[column], inplace=True)
 
-                # get the first column by number (as it doesn't have a name) and set it to go from 1 to 90000
-                df.iloc[:,0] = np.arange(0,90000)
+    #             # get the first column by number (as it doesn't have a name) and set it to go from 1 to 90000
+    #             df.iloc[:,0] = np.arange(0,90000)
 
-                # fix the "n_ttl" colun to go from 1 to 90000
-                df['n_ttl'] = np.arange(1,90001)
+    #             # fix the "n_ttl" colun to go from 1 to 90000
+    #             df['n_ttl'] = np.arange(1,90001)
 
-                print ("DF: ", df.shape)
-                df.to_excel(os.path.join(
-                            self.root_dir,
-                            self.animal_id,
-                            self.session_ids[self.session_id],
-                            'results_fixed.xlsx'), 
-                        index=False)
+    #             print ("DF: ", df.shape)
+    #             df.to_excel(os.path.join(
+    #                         self.root_dir,
+    #                         self.animal_id,
+    #                         self.session_ids[self.session_id],
+    #                         'results_fixed.xlsx'), 
+    #                     index=False)
 
-                # reload the spreadsheet
-                df = pd.read_excel(os.path.join(
-                            self.root_dir,
-                            self.animal_id,
-                            self.session_ids[self.session_id],
-                            'results_fixed.xlsx'))
+    #             # reload the spreadsheet
+    #             df = pd.read_excel(os.path.join(
+    #                         self.root_dir,
+    #                         self.animal_id,
+    #                         self.session_ids[self.session_id],
+    #                         'results_fixed.xlsx'))
 
-                # and grab the first value again                
-                self.thresh = df.loc[:, 'current_high_threshold'].values
+    #             # and grab the first value again                
+    #             self.thresh = df.loc[:, 'current_high_threshold'].values
 
-        # same for white_noise_state
-        self.white_noise_state = df.loc[:, 'white_noise_state'].values
+    #     # same for white_noise_state
+    #     self.white_noise_state = df.loc[:, 'white_noise_state'].values
 
-        # same for tone_state
-        self.tone_state = df.loc[:, 'tone_state'].values
+    #     # same for tone_state
+    #     self.tone_state = df.loc[:, 'tone_state'].values
 
-        # same for trials
-        self.trials = df.loc[:, 'trials'].values
+    #     # same for trials
+    #     self.trials = df.loc[:, 'trials'].values
 
-        #
-        self.water_reward = df.loc[:, 'water_reward'].values
+    #     #
+    #     self.water_reward = df.loc[:, 'water_reward'].values
 
-        # same for trial_rewarded
-        self.trials_rewards = df.loc[:, 'trial_rewarded'].values
+    #     # same for trial_rewarded
+    #     self.trials_rewards = df.loc[:, 'trial_rewarded'].values
 
-        # same for a columan named "ensemble_state"
-        e_state = df.loc[:, 'ensemble_state'].values
+    #     # same for a columan named "ensemble_state"
+    #     e_state = df.loc[:, 'ensemble_state'].values
 
-        # delete first few frames
-        e_state[:100] = 0 
+    #     # delete first few frames
+    #     e_state[:100] = 0 
 
-        # filter using savgol_filter
-        self.e_state = savgol_filter(e_state, 31, 3)
+    #     # filter using savgol_filter
+    #     self.e_state = savgol_filter(e_state, 31, 3)
 
-        # check to see there are <90,000 entries
-        if self.fix_spreadsheet_missing_vals:
-            if self.thresh.shape[0] < 90000:
+    #     # check to see there are <90,000 entries
+    #     if self.fix_spreadsheet_missing_vals:
+    #         if self.thresh.shape[0] < 90000:
 
-                self.thresh = self.fix_missing_vals(self.thresh)
-                self.white_noise_state = self.fix_missing_vals(self.white_noise_state)
-                self.tone_state = self.fix_missing_vals(self.tone_state)
-                self.trials = self.fix_missing_vals(self.trials)
-                self.water_reward = self.fix_missing_vals(self.water_reward)
-                self.trials_rewards = self.fix_missing_vals(self.trials_rewards)
-                self.e_state = self.fix_missing_vals(self.e_state)
+    #             self.thresh = self.fix_missing_vals(self.thresh)
+    #             self.white_noise_state = self.fix_missing_vals(self.white_noise_state)
+    #             self.tone_state = self.fix_missing_vals(self.tone_state)
+    #             self.trials = self.fix_missing_vals(self.trials)
+    #             self.water_reward = self.fix_missing_vals(self.water_reward)
+    #             self.trials_rewards = self.fix_missing_vals(self.trials_rewards)
+    #             self.e_state = self.fix_missing_vals(self.e_state)
 
 
 
@@ -4216,6 +4242,201 @@ class ProcessCalcium():
         return C
 
     #
+    def compute_bmi_to_suite2p_matches(self):
+
+        # load the ROIs from the session and match them to the ROIS from suite2p loaded data
+        session_ids = np.arange(1,len(self.session_types),1)
+
+        #
+        for session_id in session_ids:
+            # load the suite2p ROIS as F_filtered
+            F_filtered = self.sessions[session_id].F_detrended
+
+            # 
+            # load the BMI live ROIS from the results.npz file
+            if self.session_types[session_id]=='day0':
+                fname_rois = os.path.join(self.root_dir,
+                                        self.animal_id,
+                                        str(self.session_ids[session_id]),
+                                        'rois_pixels_and_thresholds_day0.npz')
+                d = np.load(fname_rois, allow_pickle=True)
+                cell_ids = d['cell_ids']
+
+                # grab the [ca] data from the suite2p data
+                # TODO
+
+            # we load 
+            else:
+                #fname = c.sessions[session_id].session_dir + '/plane0/results.npz'
+
+                # grab the .npz results file
+                fname_results = os.path.join(self.root_dir,
+                                            self.animal_id,
+                                            str(self.session_ids[session_id]),
+                                            'data',
+                                            'results.npz')
+                
+                # load the results file
+                d = np.load(fname_results, allow_pickle=True)
+
+                #
+                rois1 = d['rois_traces_raw_ensemble1']
+                rois2 = d['rois_traces_raw_ensemble2']
+                # print ("rois1: ", rois1.shape)
+                # print ("rois2: ", rois2.shape)
+
+                # compute pearson correlation between each roi in the two ensembles and all the F_filtered rois
+                #   and find the best match
+                corr1 = np.zeros((2,F_filtered.shape[0]))
+                corr2 = np.zeros((2,F_filtered.shape[0]))
+
+
+                
+                #
+                corrs = parmap.map(compute_corr2, 
+                                    [rois1[0], rois1[1], rois2[0], rois2[1]], 
+                                    F_filtered, 
+                                    pm_processes=4, 
+                                    pm_pbar=True)
+
+                ##########################################################
+                ##########################################################
+                ##########################################################
+                # save the best match ids 
+                dir_ensembles = os.path.join(self.root_dir,
+                                            self.animal_id,
+                                            str(self.session_ids[session_id]),
+                                            'ensembles')
+                if os.path.exists(dir_ensembles)==False:
+                    os.mkdir(dir_ensembles)
+
+                #
+                fname_match = os.path.join(dir_ensembles, 
+                                        'ensembles_matches_bmi_to_suite2p.npz')
+                
+                rois = [rois1[0], rois1[1], rois2[0], rois2[1]]
+
+                #
+                np.savez(fname_match,
+                        idx_text = "These are the cells in the suite2p data that match the BMI live ROIs.",
+                        idx_ensemble1_0 = np.argmax(corrs[0]),
+                        idx_ensemble1_1 = np.argmax(corrs[1]),
+                        idx_ensemble2_0 = np.argmax(corrs[2]),
+                        idx_ensemble2_1 = np.argmax(corrs[3]),
+                        
+                        # save the raw 
+                        ensemble_bmi_text = "These are the raw ROIs from the BMI live data.",
+                        ensemble1_0_bmi = rois[0],
+                        ensemble1_1_bmi = rois[1],
+                        ensemble2_0_bmi = rois[2],
+                        ensemble2_1_bmi = rois[3],
+
+                        # save the matching suite2p data
+                        ensemble_suite2p_text = "These are the matching ROIs from the suite2p data.",
+                        ensemble1_0_suite2p = F_filtered[np.argmax(corrs[0])],
+                        ensemble1_1_suite2p = F_filtered[np.argmax(corrs[1])],
+                        ensemble2_0_suite2p = F_filtered[np.argmax(corrs[2])],
+                        ensemble2_1_suite2p = F_filtered[np.argmax(corrs[3])],
+                        )
+                
+                # autosave the matches to disk also
+                for k in range(4):
+                    plt.figure(figsize=(40,10))
+                    temp = rois[k]
+                    f0 = np.median(temp)
+                    temp = (temp-f0)/f0
+
+                    # filter temp using box filter
+                    # Define the box filter kernel (window)
+                    window_size = 151  # Size of the box filter window
+                    box_filter = np.ones(window_size) / window_size
+
+                    # Apply the box filter using numpy's convolution function
+                    temp = np.convolve(temp, box_filter, mode='same')
+                    plt.plot(temp, label='ensemble roi'+str(k),
+                             alpha=.8)
+
+                    temp = np.convolve(F_filtered[np.argmax(corrs[k])], box_filter, mode='same')
+                    plt.plot(temp, 
+                            label='matching suite2p cell',
+                            alpha=.8,
+                            linewidth=1)
+                    
+                    #
+                    plt.xlabel("Frames")
+                    plt.legend()
+                    plt.savefig(fname_match[:-4]+str(k)+'.png', dpi=300)
+                    
+                    #
+                    plt.show()
+                    plt.close()
+
+    #
+    def visualize_ensemble_to_reward_average(self):
+
+
+        roi_names = ['pos1','pos2','neg1','neg2']
+
+        # make viridis colormap for len(c.session_ids) sessions
+        cmap = matplotlib.cm.get_cmap('viridis')
+        colors = cmap(np.linspace(0.1, .9, len(self.session_ids)))
+
+        #
+        plt.figure(figsize=(10,10))
+        for session_id in np.arange(1,len(self.session_ids),1):
+
+            #
+            psths_avg, psths_shuffled_avg, n_bursts  = get_reward_triggered_bmi_ensembles(session_id, 
+                                                                                        self,
+                                                                                        self.window)
+            
+            # print ("psths_avg: ", psths_avg.shape)
+            # print ("psths_shuffled_avg: ", psths_shuffled_avg.shape)
+
+            for k in range(4):
+                ax = plt.subplot(2,2,k+1)
+
+                temp = np.mean(psths_avg[k],0)*100
+
+                #
+                t = np.arange(-self.window,self.window,1)/30
+
+                plt.plot(t,temp,
+                        c=colors[session_id],
+                        label = self.session_types[session_id] if k==0 else '')
+                
+                plt.title(roi_names[k])
+
+                # plot vertical line at t=0
+                plt.plot([0,0],[0,100],'--',c='red')
+
+                # plot horizontal line at y = 0
+                plt.plot([-self.window/30.,
+                        self.window/30.],[0,0],'--',
+                        c='black')
+
+                #
+                plt.xlabel('Time (sec)')
+                if self.use_DFF:
+                    plt.ylabel("Mean DFF (%)")
+                else:
+                    plt.ylabel("Mean burst (upphase)")
+
+                #
+                plt.xlim(-self.window/30.,self.window/30.)
+
+                #
+                if k==0:
+                    plt.legend()
+
+        #  
+        plt.suptitle(self.animal_id+ " " + str(self.rec_type))
+
+
+        # 
+        plt.show()
+        
+    #
     def load_sessions(self):
 
         #for animal_id in self.animal_ids:
@@ -4238,13 +4459,21 @@ class ProcessCalcium():
             session_type = doc['session_type']
             self.session_types.append(session_type)
 
+            # check if there's a flag to use non-merged binarized data 
+            #self.use_non_merged = self.use_non_merged_rois
+
             # load rewards
             if ctrs>0:
-                _, _, reward_times = load_results_npz_standalone(self.root_dir,
+                try:
+                    _, _, reward_times = load_results_npz_standalone(self.root_dir,
                                                             self.animal_id,
                                                             ctrs,
                                                             self.session_ids)
-                reward_times = reward_times[:,1]
+                    reward_times = reward_times[:,1]
+                except:
+                    print ("couldn't reward results.npz file...")
+                    reward_times = []
+
             else:
                 reward_times = []
 
@@ -4254,17 +4483,27 @@ class ProcessCalcium():
             ################################################
             ################################################
             #
-            data_dir = os.path.join(
-                                    self.root_dir,
-                                    self.animal_id,
-                                    str(session_),
-                                    'plane0',
-                                    'merged'
-                                    )
+            if self.use_non_merged:
+                print (" ***** USING non-merged binarization")
+                data_dir = os.path.join(
+                                        self.root_dir,
+                                        self.animal_id,
+                                        str(session_),
+                                        'plane0',
+                                        )
+
+            else:
+                data_dir = os.path.join(
+                                        self.root_dir,
+                                        self.animal_id,
+                                        str(session_),
+                                        'plane0',
+                                        'merged'
+                                        )
             
             #
             if os.path.exists(data_dir)==False:
-                print ("couldn't find merged binarization...")
+                print ("couldn't find binarization...")
                 return
 
             #
@@ -4273,12 +4512,7 @@ class ProcessCalcium():
             C.data_type = '2p'
             C.set_default_parameters_2p()
 
-            #
-            C.load_suite2p()
-
-            #
-            C.load_footprints()
-
+            # #
             # paramers for binarization
             C.dff_min = self.dff_min                  # min %DFF for [ca] burst to considered a spike (default 5%) overwrites percentile threshold parameter
             C.percentile_threshold = self.percentile_threshold   # this is pretty fixed, we don't change it; we want [ca] bursts that are well outside the "physics-caused"noise
@@ -4807,11 +5041,84 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     y = sosfilt(sos, data)
     return y
 
+#
+def get_reward_triggered_bmi_ensembles(session_id, 
+                                       c,
+                                       window,
+                                       n_tests = 100
+                                       ):
+
+    # get reward times for session
+    reward_times = c.reward_times[session_id]
+   # print ("session: ", session_id, " of", len(c.session_ids)-1, ",  reward times: ", reward_times.shape)
+
+    # get cells
+    if c.use_DFF:
+        cells = c.sessions[session_id].F_detrended
+    else:
+        cells = c.sessions[session_id].F_upphase_bin
+
+    # load the esnembel matching info
+    fname_ensemble_matching = os.path.join(c.root_dir,
+                                            c.animal_id,
+                                            str(c.session_ids[session_id]),
+                                            'ensembles',
+                                            'ensembles_matches_bmi_to_suite2p.npz')
+
+    #
+    d = np.load(fname_ensemble_matching, allow_pickle=True)
+    idxs = []
+    idxs.append(d['idx_ensemble1_0'])
+    idxs.append(d['idx_ensemble1_1'])
+    idxs.append(d['idx_ensemble2_0'])
+    idxs.append(d['idx_ensemble2_1'])
+    
+    #
+    psth = []
+    psth_shuffled = []
+    n_bursts = []
+    ctr =0
+    for idx in idxs:
+        psth.append([])
+        psth_shuffled.append([])
+        temp = cells[idx]
+
+        # count the number of bursts in temp
+        diff = temp[1:]-temp[:-1]
+        idx = np.where(diff==1)[0]
+        n_bursts.append(idx.shape[0])
+
+        #
+        for r in reward_times:
+            temp2 = temp[r-window:r+window]
+            if temp2.shape[0]==window*2:
+                psth[ctr].append(temp2)
+
+            # same for random times
+            temp3 = []
+            for n in range(n_tests):
+                idx = np.random.choice(np.arange(window,cells.shape[1]-window,1))
+                temp2 = temp[idx-window:idx+window]
+                if temp2.shape[0]==window*2:
+                    temp3.append(temp2)
+
+            psth_shuffled[ctr].append(np.mean(temp3,0))
+
+        #
+        ctr+=1
+    #
+    psths = np.array(psth)
+    psths_shuffled = np.array(psth_shuffled)
+
+    #
+
+    return psths, psths_shuffled, n_bursts
 
 def get_reward_triggered_psth(session_id, 
                               c,
                               window,
                               idx_cells,
+                              global_order,
                               n_tests = 100):
 
     # get reward times for session
@@ -4820,7 +5127,7 @@ def get_reward_triggered_psth(session_id,
 
     # get cells
     cells = c.sessions[session_id].F_upphase_bin
-    #print ("cells: ", cells.shape)
+    print ("[ca] matrix: ", cells.shape)
 
     #
     psth = []
@@ -4870,13 +5177,14 @@ def get_reward_triggered_psth(session_id,
     psths_avg[idx]=0
 
     #
-    if idx_cells is None:
-         # order the cells by ptp in axis 1
+    if global_order==False or idx_cells==None:
+        # order the cells by ptp in axis 1
         ptps = np.ptp(psths_avg,1)
-        idx_cells = np.argsort(ptps)[::-1]
+        idx_cells = np.argsort(ptps)
 
     return psths_avg, psths_shuffled_avg, idx_cells, n_bursts
 
+##########################################
 from scipy.signal import butter, sosfilt
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
@@ -4909,14 +5217,14 @@ def plot_multi_session_psth_imshow(c,
 
     #
     suas = []
-    for k in range(psth_array.shape[0]):
+    for k in range(len(psth_array)):
         ax = plt.subplot(gs[:6, k])
 
         #
         ax.imshow(psth_array[k],
-                aspect='auto',
-                interpolation='none',
-                vmin=0,vmax=vmax)
+                  aspect='auto',
+                  interpolation='none',
+                  vmin=0,vmax=vmax)
 
         # also make a sua by summing over axis 0
         sua = np.sum(psth_array[k],0)
@@ -4926,31 +5234,34 @@ def plot_multi_session_psth_imshow(c,
 
         ##############################################
         # plot vertical line at reward time 
-        ax.plot([window,window],[0,psth_array.shape[1]],'r--')
+        ax.plot([window,window],[0,len(psth_array[k])],'r--')
 
         # change xticks to range from -3 to 3
         #tt1 = np.arange(0,psth_array.shape[2]+1,30)
-        tt1 = np.linspace(0,psth_array.shape[2],5)
+        tt1 = np.linspace(0,len(psth_array[k][0]),5)
         tt2 = np.round(np.linspace(-window/30,window/30,tt1.shape[0]),1)
         ax.set_xticks(tt1,tt2)
 
         #
         if k==0:
             ax.set_ylabel("Cell #")
-            ax.set_yticks(np.arange(0,psth_array.shape[1],5),
-                          np.arange(0,psth_array.shape[1],5))
+            ax.set_yticks(np.arange(0,len(psth_array[k]),5),
+                          np.arange(0,len(psth_array[k]),5))
         else:
             ax.set_yticks([])
 
         #
-        ax.set_ylim(0,psth_array.shape[1])
+        ax.set_ylim(0,len(psth_array[k]))
 
         #
-        ax.set_title("Session: "+str(k+1)+", # rew: "+ str(len(c.reward_times[session_ids[k]])),fontsize=10 )
+        ax.set_title("Session: "+str(k+1)+"\n # rew: "
+                     + str(len(c.reward_times[session_ids[k]])),fontsize=7 )
 
         #
         ax.set_xlabel("Time (sec)",fontsize=10)
 
+        ##################################################
+        ##################################################
         ##################################################
         # add the distribution of bursts at the bottom
         ax = plt.subplot(gs[-1,k])
@@ -5600,7 +5911,22 @@ def compute_si_1D(cell_ids,
             # So time map should just count over and over again 
             time_map = []
             rate_map = []
-            time_map = np.arange(window*2)*reward_times.shape[0]
+            try:
+                time_map = np.arange(window*2)*reward_times.shape[0]
+            except:
+                # most likely the .npz file with the reward times is corrupt
+                # so try to recover it from the excel file
+                fname = os.path.join(root_dir,
+                                     animal_id,
+                                     session_name,
+                                    'results_fixed.xlsx')
+
+                reward_times = find_reward_times_corrupt_npz(fname)
+
+                #
+                time_map = np.arange(window*2)*reward_times.shape[0]
+
+
             for r in reward_times:
                 temp2 = cell_upphase[r-window:r+window]
                 if temp2.shape[0]==window*2:
@@ -5678,3 +6004,105 @@ def compute_si_1D(cell_ids,
                      si_shuffle = si_shuffle,
                      zscore = zscore,
                      n_bursts = n_bursts)
+            
+
+def compute_corr2(roi, F_filtered):
+
+    corr_array = np.zeros((F_filtered.shape[0]))
+    temp = roi
+    f0 = np.median(temp)
+    temp = (temp-f0)/f0
+    for k in range(F_filtered.shape[0]):
+        #
+        res = scipy.stats.pearsonr(F_filtered[k],temp)
+        corr_array[k]=res[0]
+    
+    return corr_array
+
+
+def find_reward_times_corrupt_npz(fname):
+
+
+    fname_out = os.path.split(fname)[0] + '/reward_times_recovered.npz'
+
+    # check if the file already exists
+    if os.path.exists(fname_out):
+        d = np.load(fname_out, allow_pickle=True)
+        return d['reward_times']
+
+    # load the excel file
+    import pandas as pd
+    df = pd.read_excel(fname)
+
+    # grab column named "water_reward"
+    water_reward = df['water_reward'].values
+
+    # find reward onsets from 0 to 1 in the boolean time series
+    idxs = np.where(water_reward==1)[0]
+    diffs = idxs[1:]-idxs[:-1]
+    idx2 = np.where(diffs>1)[0]
+
+
+    idx3 = idxs[idx2+1]
+    # add idxs[0] to idx3
+    idx3 = np.append(idxs[0],idx3)
+
+    #
+    plt.figure()
+    plt.plot(water_reward)
+    # and plot vertical lines at idx3
+    for k in range(len(idx3)):
+        plt.plot([idx3[k],idx3[k]],[0,1],'r--')
+
+
+    plt.show()
+
+    # save the idx3 as an npz file
+    np.savez(fname_out, 
+             reward_times=idx3)
+    
+
+    return idx3
+
+#
+def get_trials2(
+                white_noise_state,
+                post_reward_state,
+                reward_lockout_counter
+                ):
+
+    # simpler version of the above function 
+    # we loop over reward_lockout_counter 
+
+    trials = []
+    start = 0
+    in_trial = True
+
+    #print ("reward_lockout_counter: ", reward_lockout_counter)
+    #print (np.where(reward_lockout_counter>=0)[0].shape[0])
+    for k in trange(reward_lockout_counter.shape[0]):
+        # check if we're hit a reward lockout
+        if reward_lockout_counter[k]>=0:
+            # check to see if in trial that should be ended
+            if in_trial:
+                # end trial
+                in_trial = False
+                end = k
+                
+                # also check to see if the trial ended into a post-reward state
+                if post_reward_state[k+1]==1:
+                    # add trial
+                    trials.append([start,end,1])
+                else: 
+                    # it was a non-rewarded trial
+                    trials.append([start,end,0])
+        
+        # else we are in a rewardable period    
+        elif reward_lockout_counter[k]<0: 
+            # check to see if we're in a trial otherwise start one
+            if in_trial==False:
+                # start trial
+                in_trial = True
+                start = k
+    
+    return np.array(trials)

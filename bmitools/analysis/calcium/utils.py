@@ -2254,3 +2254,300 @@ class ProcessSession():
         else:
             plt.close()
 
+
+from scipy.signal import butter, sosfilt
+def butter_bandpass(lowcut, highcut, fs, order=5):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    sos = butter(order, [low, high],analog=False, btype='band', output='sos')
+    #b, a = scipy.signal.cheby1(order, [low, high], btype='band')
+    return sos
+
+
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
+    sos = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = sosfilt(sos, data)
+    return y
+
+#
+def get_ave_maps(c,
+                 session_ids,
+                 ):
+    
+    #
+    clrs = ['black','blue','red','green','magenta','cyan','pink','orange','purple','brown']
+
+    # make viridis color map to have 11 colors
+    clrs2 = plt.cm.viridis(np.linspace(0,1,len(session_ids)))    
+
+    #
+    clrs_maps = []
+    n_cells = []
+    n_cells_all = []
+    n_rewards = []
+    ave_maps = []
+    ctr_sess = 0
+    sess_maps = []
+    for session_id in tqdm(session_ids):
+
+        # iniatize the data based on the sesssion
+        cells = c.sessions[session_id].F_upphase_bin
+        cell_idxs = np.arange(cells.shape[0])
+        n_cells_all.append(cells.shape[0])
+
+        # load all cell sum_map and store in a list
+        temp_cells = 0
+        temp_ave_maps = []
+        for k in cell_idxs:
+            fname = os.path.join(c.root_dir,
+                                c.animal_id,
+                                str(c.session_ids[session_id]),
+                                'spatial_info',
+                                str(k)+'.npz')
+            
+            #
+            try:
+                d = np.load(fname, 
+                        allow_pickle=True)
+            except:
+                continue
+            # 
+            si = d['si']
+            zscore = d['zscore']
+
+            #print ("zscore: ", zscore)
+            # if zscore<thresh_zscore:
+            #     continue
+
+
+            ave_map = d['ave_map']
+            #sum_map = d['sum_map']
+            reward_times = d['reward_times']
+
+            #
+            #reward_times = d['reward_times']
+            #selectivity = d['selectivity']
+           # sparsity = d['sparsity']
+
+            #
+            rewards = reward_times.shape[0]
+
+            #
+            temp = ave_map.copy()
+
+            #
+            if c.use_zscore:
+                if c.zscore<c.thresh_zscore:
+                    continue
+            if c.use_ave_thresh:
+                if np.max(temp)<c.thresh_ave:
+                    continue
+
+            # check if sum_map contains nans and exclude
+            if np.isnan(temp).any():
+                continue
+
+            # smooth the sum map using butter filter
+            #temp = butter_bandpass_filter(temp, 0.01, 1, 30, order=5)
+
+            # bin data
+            temp = np.mean(temp.reshape(-1, c.bin_width), axis=1)
+
+            # normalize trace 
+            if c.normalize_trace:
+                temp = temp/np.max(temp)
+
+            #
+            temp_ave_maps.append(temp)
+            ave_maps.append(temp)
+            clrs_maps.append(clrs2[ctr_sess])
+
+            temp_cells+=1
+        
+        n_cells.append(temp_cells)
+        n_rewards.append(rewards)
+        sess_maps.append(temp_ave_maps)
+
+        #
+        ctr_sess+=1
+
+    ave_maps = np.array(ave_maps)
+    clrs_maps = np.array(clrs_maps)
+    print ("ave_maps: ", ave_maps.shape)
+    print ("clrs_maps: ", clrs_maps.shape)
+
+    c.ave_maps = ave_maps
+    c.clrs_maps = clrs_maps
+    c.n_cells = n_cells
+    c.n_rewards = n_rewards
+    c.sess_maps = sess_maps
+    c.n_cells_all = n_cells_all
+
+    return c
+
+
+
+def plot_multi_session_thresholded_cells(c):
+
+    #
+    plt.figure(figsize=(15,4))
+    ctr=0
+    for l in trange(len(c.n_cells)):
+        plt.subplot(1,8, l+1)
+        temp = np.array(c.sess_maps[l])
+        #print ("original input shape: ", temp.shape)
+
+        temp = temp[:,temp.shape[1]//2-int(c.window*30/c.bin_width):
+                    temp.shape[1]//2+int(c.window*30/c.bin_width)]
+
+       # print ("clipped input: ", temp.shape)
+        median = np.median(temp.T,axis=1)
+       # print ("median: ", median.shape)
+
+        # get time 
+        #t = np.arange(temp.shape[1])
+        #print ("t: ", t.shape)
+
+        # clip the median around centre to have shape of t
+#        median = median[median.shape[0]//2-window:median.shape[0]//2+window]
+        #print ("median: ", median.shape)
+
+        plt.plot(temp.T,
+                c='black',
+                alpha=.1)
+        plt.ylim(0,1)
+
+        ##################################
+        # plot also average of temp.T
+        plt.plot(median,
+                c='red',
+                linewidth=3)
+
+        # vertical line half way
+        plt.plot([temp.shape[1]/2, temp.shape[1]/2],
+                [0,1],
+                '--',
+                c='red')
+
+        # relabel x axis to go from -20 to 20
+        xticks = np.arange(-c.window,c.window+1,c.window//2)
+
+        #
+        plt.xticks(np.linspace(0,temp.shape[1],xticks.shape[0]), xticks,
+                fontsize=7)
+
+        # 
+        #if l>=4:
+        plt.xlabel("Time (s)")
+
+        if l>0:
+            plt.yticks([])
+
+        # title
+        plt.title("tot cells: " + str(c.n_cells_all[l])
+                  + "\nthresh cells: " + str(c.n_cells[l])
+                  + ", # rew: " + str(c.n_rewards[l]),
+                  fontsize=8)
+
+
+
+    plt.suptitle("Mouse ID: " + c.animal_id + ", rec type: " + str(c.rec_type)
+                + " zscore " + str(c.use_zscore) + " (" + str(c.thresh_zscore) + ") ave thresh: "
+                +str(c.use_ave_thresh) + "(" + str(c.thresh_ave)+ ")"
+                , fontsize=8
+                )
+
+
+
+    plt.show()
+
+    # also save the image in the /results folder of that animal
+    fname_png = os.path.join(c.root_dir,
+                            c.animal_id,
+                            'results',
+                            'significant_cell_responses.png')
+    plt.savefig(fname_png, dpi=300)
+
+#
+def make_umap_pca(c):
+        
+    # make clrs_maps discrete viridis map length of n_cells
+
+    from sklearn.decomposition import PCA
+
+    #
+    X_in = c.ave_maps.copy()
+    print ("X_in: ", X_in.shape)
+
+    #
+    pca = PCA(n_components=np.min(X_in.shape))
+    pca.fit(X_in)
+
+    # print variance explained
+    print ("PCA variance explained: ", pca.explained_variance_ratio_[:5])
+
+    #
+    sum_maps_pca = pca.transform(X_in)
+    print ("sum_maps_pca: ", sum_maps_pca.shape)
+
+    #
+    plt.figure(figsize=(15,10))
+    #ax=plt.subplot(1,2,1)
+    # draw 3d scatter plot
+    ax = plt.subplot(1,2,1, projection='3d')
+    ctr= 0
+    ctr2 = 0
+    for k in c.n_cells:
+        print (c.session_ids[ctr2+1], ", ctr: ", ctr, " k: ", k)
+        ax.scatter(sum_maps_pca[ctr:ctr+k,0], 
+                    sum_maps_pca[ctr:ctr+k,1],
+                    sum_maps_pca[ctr:ctr+k,2],
+                    s=75,
+                    alpha = 0.5,
+                    #edgecolors='black',
+                    color=c.clrs_maps[ctr:ctr+k],
+                    label = "# cells: "
+                              +str(c.n_cells[ctr2])
+                              + ", # rew: " + str(c.n_rewards[ctr2])
+                    )
+        ctr+=k
+        ctr2+=1
+    #
+    plt.legend()
+
+    ##################################################
+    import umap
+    reducer = umap.UMAP()
+    sum_maps_umap = reducer.fit_transform(X_in)
+    plt.title("PCA , variance explained: " + str(np.round(pca.explained_variance_ratio_[:5],2)))
+
+    ###########################
+    ax = plt.subplot(1,2,2)
+    plt.scatter(sum_maps_umap[:,0], 
+                sum_maps_umap[:,1], 
+                s=100,
+                alpha = 0.5,
+                edgecolors='black',
+                color=c.clrs_maps
+                )
+    plt.title("UMAP")
+
+    #    
+    plt.suptitle("Mouse ID: " + c.animal_id + ", rec type: " + str(c.rec_type)
+                + " zscore " + str(c.use_zscore) + " (" + str(c.thresh_zscore) + ") ave thresh: "
+                  +str(c.use_ave_thresh) + "(" + str(c.thresh_ave)+ ")"
+                
+                )
+
+    #
+    plt.show()
+
+    # also save the image in the /results folder of that animal
+    fname_png = os.path.join(c.root_dir,
+                            c.animal_id,
+                            'results',
+                            'pca_umap.png')
+
+    #
+    plt.savefig(fname_png, dpi=300)
