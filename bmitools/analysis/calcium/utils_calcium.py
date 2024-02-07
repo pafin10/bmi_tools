@@ -5120,48 +5120,71 @@ def get_reward_triggered_psth(session_id,
                               idx_cells,
                               global_order,
                               n_tests = 100):
+    
+    fname_out = os.path.join(c.root_dir,
+                            c.animal_id,
+                            str(c.session_ids[session_id]),
+                            'results',
+                            'reward_triggered_psth.npz')
+    
+    if os.path.exists(fname_out)==False:
 
-    # get reward times for session
-    reward_times = c.reward_times[session_id]
-    print ("session: ", session_id, " of", len(c.session_ids)-1, ",  reward times: ", reward_times.shape)
+        # get reward times for session
+        reward_times = c.reward_times[session_id]
+        print ("session: ", session_id, " of", 
+            len(c.session_ids)-1, 
+            ",  reward times: ", len(reward_times))
 
-    # get cells
-    cells = c.sessions[session_id].F_upphase_bin
-    print ("[ca] matrix: ", cells.shape)
-
-    #
-    psth = []
-    psth_shuffled = []
-    n_bursts = []
-    for k in range(cells.shape[0]):
-        psth.append([])
-        psth_shuffled.append([])
-        temp = cells[k]
-
-        # count the number of bursts in temp
-        diff = temp[1:]-temp[:-1]
-        idx = np.where(diff==1)[0]
-        n_bursts.append(idx.shape[0])
+        # get cells
+        cells = c.sessions[session_id].F_upphase_bin
+        print ("[ca] matrix: ", cells.shape)
 
         #
-        for r in reward_times:
-            temp2 = temp[r-window:r+window]
-            if temp2.shape[0]==window*2:
-                psth[k].append(temp2)
+        psth = []
+        psth_shuffled = []
+        n_bursts = []
+        for k in range(cells.shape[0]):
+            psth.append([])
+            psth_shuffled.append([])
+            temp = cells[k]
 
-            # same for random times
-            temp3 = []
-            for n in range(n_tests):
-                idx = np.random.choice(np.arange(window,cells.shape[1]-window,1))
-                temp2 = temp[idx-window:idx+window]
+            # count the number of bursts in temp
+            diff = temp[1:]-temp[:-1]
+            idx = np.where(diff==1)[0]
+            n_bursts.append(idx.shape[0])
+
+            #
+            for r in reward_times:
+                temp2 = temp[r-window:r+window]
                 if temp2.shape[0]==window*2:
-                    temp3.append(temp2)
+                    psth[k].append(temp2)
 
-            psth_shuffled[k].append(np.mean(temp3,0))
+                # same for random times
+                temp3 = []
+                for n in range(n_tests):
+                    idx = np.random.choice(np.arange(window,cells.shape[1]-window,1))
+                    temp2 = temp[idx-window:idx+window]
+                    if temp2.shape[0]==window*2:
+                        temp3.append(temp2)
 
-    #
-    psths = np.array(psth)
-    psths_shuffled = np.array(psth_shuffled)
+                psth_shuffled[k].append(np.mean(temp3,0))
+
+        #
+        psths = np.array(psth)
+        psths_shuffled = np.array(psth_shuffled)
+
+        #
+        np.savez(fname_out, 
+                 psths= psths,
+                psths_shuffled = psths_shuffled,
+                n_bursts = n_bursts)
+    
+    else:
+        d = np.load(fname_out, allow_pickle=True)
+        psths = d['psths']
+        psths_shuffled = d['psths_shuffled']
+        n_bursts = d['n_bursts']
+
 
     # average across trials
     if True:
@@ -5172,15 +5195,21 @@ def get_reward_triggered_psth(session_id,
         psths_shuffled_avg = np.nanmedian(psths_shuffled,1)
 
     # find cells with all nans
-    psth_sums = np.nansum(psths_avg,1)
-    idx = np.where(psth_sums==0)[0]
-    psths_avg[idx]=0
+    try:
+        psth_sums = np.nansum(psths_avg,1)
+        idx = np.where(psth_sums==0)[0]
+        psths_avg[idx]=0
+    except:
+        pass
 
     #
     if global_order==False or idx_cells==None:
-        # order the cells by ptp in axis 1
-        ptps = np.ptp(psths_avg,1)
-        idx_cells = np.argsort(ptps)
+        try:
+            # order the cells by ptp in axis 1
+            ptps = np.ptp(psths_avg,1)
+            idx_cells = np.argsort(ptps)
+        except:
+            pass
 
     return psths_avg, psths_shuffled_avg, idx_cells, n_bursts
 
@@ -5210,7 +5239,7 @@ def plot_multi_session_psth_imshow(c,
                                    vmax):
     
     #
-    plt.figure()
+    #plt.figure()
     from matplotlib import gridspec
     # make a gridspec with 7 rows and 7 columns
     gs = gridspec.GridSpec(8,len(c.session_ids)-1)
@@ -5297,7 +5326,7 @@ def plot_multi_session_psth_imshow(c,
                 alpha=0.5)
 
     #
-    plt.suptitle(c.animal_id + "(Vmax = "+str(vmax)+")",fontsize=14)
+    plt.suptitle(c.animal_id + " "+c.rec_type+ " (Vmax = "+str(vmax)+")",fontsize=14)
 
     plt.show()
 
@@ -6106,3 +6135,178 @@ def get_trials2(
                 start = k
     
     return np.array(trials)
+
+
+def process_populations(c, plotting=False):
+    window = 30*6
+    psth_array = []
+    idx_cells = None
+    global_order = False
+    session_ids = np.arange(1,len(c.session_ids),1)
+    n_tests = 1
+
+    #
+    n_bursts_array = []
+    for session_id in session_ids:
+    #for session_id in [1]:
+
+        #
+        psths_avg, psths_shuffled_avg, idx_cells, n_bursts  = get_reward_triggered_psth(session_id, 
+                                                                                        c,
+                                                                                        window,
+                                                                                        idx_cells,
+                                                                                        global_order,
+                                                                                        n_tests)
+        
+        #
+        n_bursts_array.append(n_bursts)
+        
+        #
+        psth_array.append(psths_avg[idx_cells])
+
+        if global_order==False:
+            idx_cells = None
+
+    #
+    if plotting:
+        vmax = 0.3
+        plt.figure(figsize=(20,12))
+        sua = plot_multi_session_psth_imshow(c,
+                                        session_ids,
+                                        psth_array,
+                                        window,
+                                        n_bursts_array,
+                                        vmax=vmax)
+
+
+def generate_learning_profiles(root_dir, 
+                               animal_ids,
+                               group_name, 
+                               CA3_groups, 
+                               M1_groups, 
+                               threshold, 
+                               norm_percentage, 
+                               normalize):
+
+    #
+    plt.figure()
+    pops = [[],[],[]]
+    for animal_id in tqdm(animal_ids):
+
+        #session_ids = np.arange(1,len(c.session_ids),1)
+        if group_name=='M1':
+            idx = find_animal_group(M1_groups, animal_id)
+        else:
+            idx = find_animal_group(CA3_groups, animal_id)
+        
+        # if we can't find the group, skip
+        if idx ==-1:
+            continue
+
+        #
+        plt.subplot(1,3,idx+1)
+
+        #       
+        c = ProcessCalcium(root_dir,
+                        animal_id)
+        
+        #
+        n_cells = []
+        if animal_id in ['DON-011733']:
+            thresh = 0.1
+        else:
+            thresh = threshold
+
+        #
+        for session_id in range(1,len(c.session_ids),1):
+
+            #    
+            fname_out = os.path.join(c.root_dir,
+                                    c.animal_id,
+                                    str(c.session_ids[session_id]),
+                                    'results',
+                                    'reward_triggered_psth.npz')
+            
+            if os.path.exists(fname_out)==False:
+                n_cells.append(np.nan)
+                continue
+
+            # get # of cells by looking into the binarized file
+            fname_binarized = os.path.join(c.root_dir,
+                                            c.animal_id,
+                                            str(c.session_ids[session_id]),
+                                            'plane0',
+                                            'binarized_traces.npz')
+            d = np.load(fname_binarized, mmap_mode='r', allow_pickle=True)
+            F_upphase = d['F_upphase']
+            total_cells = F_upphase.shape[0]
+
+            #
+            d = np.load(fname_out, allow_pickle=True)
+            psths = d['psths']
+            psths_shuffled = d['psths_shuffled']
+            n_bursts = d['n_bursts']
+
+            # check how many pshs have a peak > thrsh
+            psth_mean = np.mean(psths, axis=1)
+
+            #
+            try:
+                temp = np.where(psth_mean.max(1)>thresh)[0]
+            except:
+                print (fname_out)
+                #
+
+            if norm_percentage:
+                n_cells.append(temp.shape[0]/total_cells*100)
+            else:
+                n_cells.append(temp.shape[0])
+
+        #
+        if normalize:
+            n_cells = np.array(n_cells)/np.max(n_cells)
+        else:
+            n_cells = np.array(n_cells)
+
+        
+        #
+        if n_cells.shape[0]<8:
+            n_cells = np.concatenate((n_cells, np.zeros(8-n_cells.shape[0])+np.nan))
+        
+        #
+        engagement = n_cells[3]/n_cells[0]
+
+        #
+        plt.plot(n_cells,
+                linewidth = 4, 
+                label=animal_id + " " + str(np.round(engagement*100,2)) + "%")
+        #
+        pops[idx].append(n_cells)
+        
+        #
+        plt.legend()
+
+    # now compute average pops and std also
+    for k in range(len(pops)):
+        ax = plt.subplot(1,3,k+1)
+        temp = np.array(pops[k])
+        mean = np.nanmean(temp, axis=0)
+        std = np.nanstd(temp, axis=0)
+        try:
+            plt.plot(mean, c='black')
+            plt.fill_between(np.arange(mean.shape[0]), mean-std, mean+std, alpha=.2, color='black')
+            plt.ylabel("% of cells with reward triggered response")
+            plt.xlabel("Sessions")
+        except:
+            pass
+
+    plt.show()
+
+
+
+
+def find_animal_group(groups, animal_id):
+    for k in range(len(groups)):
+        if animal_id in groups[k]:
+            return k
+    return -1

@@ -6,6 +6,7 @@ import os
 import pandas as pd
 from tqdm import tqdm, trange
 import yaml
+import json
 
 import scipy.ndimage
 #from matplotlib_scalebar.scalebar import ScaleBar
@@ -81,12 +82,14 @@ class ProcessCohort():
         ax1=plt.subplot(1,2,1)
         ax2=plt.subplot(1,2,2)
 
-        line_styles = ['-', '--', ':', '-.', (0, (5, 2)), (0, (1, 1)), (0, (3, 1, 1, 1)), (0, (3, 2, 1, 2))]
+        line_styles = ['-', ':', '-', ':', '-', ':', '-', ':', '-', ':', ]
         
-        clrs = ['black','red']
-        clrs_m1 = ['green','darkgreen','lightseagreen','blue','navy','royalblue','darkblue','lightblue']
-        clrs_ca3 = ['red','darkred','lightcoral','orange','gold','pink']
-        clrs = ['black','red', 'blue', 'green', 'orange', 'purple', 'pink', 'brown']
+        #clrs = ['black','red']
+        clrs_m1 = ['green','lightseagreen','blue','navy','darkblue','lightblue', 'indigo','darkgreen',
+                   # dark 
+                   'brown']
+        clrs_ca3 = ['red','darkred','lightcoral','orange','gold','magenta']
+        #clrs = ['black','red', 'blue', 'green', 'orange', 'purple', 'pink', 'brown']
         ctr_m1 = 0
         ctr_ca3 = 0
         
@@ -103,7 +106,7 @@ class ProcessCohort():
             while len(temp)<8:
                 temp = np.hstack((temp,np.nan))
                             #
-            if rec_types[k][0]=='m1':
+            if rec_types[k]=='m1':
                 #
                 ave_m1.append(temp)
 
@@ -112,10 +115,10 @@ class ProcessCohort():
                         linewidth = 5,
                         linestyle = line_styles[ctr_m1],
                         c=clrs_m1[ctr_m1],
-                        label = self.animal_ids[k] + " " + rec_types[k][0]
+                        label = self.animal_ids[k] + " " + str(rec_types[k])
                         )
                 ctr_m1+=1
-            elif rec_types[k][0]=='ca3':
+            elif rec_types[k]=='ca3':
                 ave_ca3.append(temp)
                 
                 ax2.plot(x,hit_rates[k],
@@ -123,7 +126,7 @@ class ProcessCohort():
                         linewidth = 5,
                         linestyle = line_styles[ctr_ca3],
                         c=clrs_ca3[ctr_ca3],
-                        label = self.animal_ids[k] + " " + rec_types[k][0]
+                        label = self.animal_ids[k] + " " + str(rec_types[k])
                         )
                 ctr_ca3+=1
             else:
@@ -165,10 +168,10 @@ class ProcessCohort():
         
         #
         ax1.legend()
-        ax1.set_ylim(0.1,0.8)
+        ax1.set_ylim(0.0,0.8)
 
         ax2.legend()
-        ax2.set_ylim(0.1,0.8)
+        ax2.set_ylim(0.0,0.8)
  
         # write xticks as session numbers
         xticks = []
@@ -180,9 +183,10 @@ class ProcessCohort():
         ax1.set_ylabel("% hit rate", fontsize=20)
         ax1.set_title("M1", fontsize=20)
 
-        # add shading horizontal at 25% of thickness 5%
-        ax1.axhspan(0.225, 0.275, alpha=0.2, color='black')
-
+        # plot black dashe dline at y = 0.2
+        ax1.plot([0,7],[0.2,0.2], '--', c='black',
+                 linewidth=5, alpha=0.5)
+        
         # increase font sizes
         ax1.tick_params(axis='both', which='major', labelsize=20)
 
@@ -193,8 +197,8 @@ class ProcessCohort():
         ax2.set_ylabel("% hit rate", fontsize=20)
         ax2.set_title("CA3", fontsize=20)
 
-        # add shading horizontal at 25%
-        ax2.axhspan(0.225, 0.275, alpha=0.2, color='black')
+        ax2.plot([0,7],[0.2,0.2], '--', c='black',
+                 linewidth=5, alpha=0.5)
 
         # increase font sizes
         ax2.tick_params(axis='both', which='major', labelsize=20)
@@ -216,13 +220,16 @@ class ProcessCohort():
         plt.savefig(os.path.join(self.root_dir,
                                  'cohort_hit_rates.png'), dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
-        np.save(os.path.join(self.root_dir,
-                            'cohort_hit_rates.npy'), hit_rates)
+        # save nested list as numpy array
+        fname = os.path.join(self.root_dir,
+                            'cohort_hit_rates.npy')
+        
+        #np.save(fname, hit_rates, allow_pickle=True)
 
     #
     def cohort_hit_rate_early_vs_late_ca3_vs_m1(self):
@@ -597,10 +604,10 @@ class ProcessCohort():
         plt.savefig(os.path.join(self.root_dir,
                                  'cohort_hit_rates.png'), dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         np.save(os.path.join(self.root_dir,
                             'cohort_hit_rates.npy'), hit_rates)
@@ -693,10 +700,16 @@ class ProcessSession():
                                self.animal_id+'.yaml')) as file:
             doc = yaml.load(file, Loader=yaml.FullLoader)
 
-        self.session_ids = np.array(doc['session_names'],dtype='str')
+        try:
+            self.session_ids = np.array(doc['session_names'],dtype='str')
+        except:
+            self.session_ids = np.array(doc['session_ids'],dtype='str')
 
         #
-        self.rec_type = np.array(doc['anatomy'],dtype='str')
+        try:
+            self.rec_type = np.array(doc['anatomy'],dtype='str')
+        except:
+            self.rec_type = np.array(doc['rec_type'],dtype='str')
         
         
         # default show plots
@@ -709,7 +722,8 @@ class ProcessSession():
         if os.path.exists(self.save_dir)==False:
             os.mkdir(self.save_dir)
 
-    # 
+        #
+    #
     def plot_rewarded_ensembles(self):
 
         #
@@ -818,8 +832,8 @@ class ProcessSession():
                                  "calibration_threshold_plot.png"))
             
 
-        
-        plt.show()
+        plt.close()
+        #plt.show()
 
 
     #
@@ -1092,10 +1106,10 @@ class ProcessSession():
             plt.title(self.animal_id +  " -- " + session_id)
             plt.savefig(os.path.join(self.save_dir,'intra_session_reward_hist_per_minute_simulated.png'),dpi=200)
 
-            if self.show_plots:
-                plt.show()
-            else:
-                plt.close()
+            # if self.show_plots:
+            #     plt.show()
+            # else:
+            plt.close()
 
             self.session_id = session_id
 
@@ -1166,10 +1180,10 @@ class ProcessSession():
                                 self.animal_id,
                                  'contingency_degradation.png'), dpi=200)
         plt.suptitle(self.animal_id)
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         np.save(os.path.join(self.root_dir,
                                 self.animal_id, 'contingency_degradation.npy'), y)
@@ -1237,17 +1251,16 @@ class ProcessSession():
         plt.suptitle(self.animal_id)
 
 
-        plt.savefig(os.path.join(self.root_dir,
-                                self.animal_id,
-                                 'early_vs_late.png'), dpi=200)
+        plt.savefig(os.path.join(self.save_dir,
+                                 'early_vs_late.png'), dpi=300)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
-        np.save(os.path.join(self.root_dir,
-                                self.animal_id, 'early_vs_late.npy'), [early,late])
+        np.save(os.path.join(self.save_dir,
+                             'early_vs_late.npy'), [early,late])
 
 
     def early_vs_late_session(self):
@@ -1314,10 +1327,10 @@ class ProcessSession():
                                 self.animal_id,
                                  'early_vs_late_per_session.png'), dpi=200)
         #
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         np.save(os.path.join(self.root_dir,
                              self.animal_id, 'early_vs_late_per_session.npy'), [early,late])
@@ -1409,12 +1422,18 @@ class ProcessSession():
 
         except:
             print ("Could not load file: ", fname)
+            print ("...loading from xlsx file")
             self.reward_times = [None]
+            
+            self.skip_dict = False
             
         #
         #######################################################
         ################## LOAD DICTIONARY ####################
         #######################################################
+        if self.skip_dict:
+            #print ("Skipping dictionary")
+            return
         fname_dict = os.path.join(self.root_dir,
                                   self.animal_id,
                                   self.session_id,
@@ -1538,10 +1557,10 @@ class ProcessSession():
 
         plt.savefig(fname_out ,dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
 	#
     def process_calibration(self):
@@ -1748,10 +1767,10 @@ class ProcessSession():
 
         plt.savefig(os.path.join(self.save_dir,'session.png'),dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
 
     #
@@ -1833,10 +1852,10 @@ class ProcessSession():
                          '--',c='grey')
         plt.savefig(os.path.join(self.save_dir, 'correlograms_reward_vs_licking.png'), dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         np.save(fname_out, corr)
 
@@ -1885,17 +1904,112 @@ class ProcessSession():
         plt.xlabel("Time (mins)")
         plt.savefig(os.path.join(self.save_dir,'cell_isis.png'),dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         #
         np.save(fname_out, isi_array)
 
+    #
+    def compute_intra_session_coincidence_bursts_positive_ensemble(self):
+
+        fname_out = os.path.join(self.save_dir, 'cell_burst_coincidence.npz')
+
+        if os.path.exists(fname_out) and self.recompute_session==False:
+            return
+
+        fps =30.
 
 
+        plt.figure()
+        e1 = self.F_upphase_bin[0]
+        e2 = self.F_upphase_bin[1]
 
+        #
+        e_sum = e1+e2
+        coincident_bursts = np.where(e_sum==2)[0]#/float(self.sample_rate)/60.
+        e3 = e1.copy() *0
+        e3[coincident_bursts] = 1
+
+        # compute widths of each burst...
+        from scipy.signal import chirp, find_peaks, peak_widths
+        peaks1, _ = find_peaks(e1)  # middle of the pluse/peak
+        widths1, heights, starts, ends = peak_widths(e1, peaks1)
+        peaks2, _ = find_peaks(e2)  # middle of the pluse/peak
+        widths2, heights, starts, ends = peak_widths(e2, peaks2)
+        peaks3, _ = find_peaks(e3)
+        widths3, heights, starts, ends = peak_widths(e3, peaks3)
+
+        # compute len of widths1
+        len_widths1 = []
+        for k in range(widths1.shape[0]):
+            len_widths1.append(widths1[k])
+        len_widths1 = np.array(len_widths1)
+        len_widths2 = []
+        for k in range(widths2.shape[0]):
+            len_widths2.append(widths2[k])
+        len_widths2 = np.array(len_widths2)
+        len_widths3 = []
+        for k in range(widths3.shape[0]):
+            len_widths3.append(widths3[k])
+        len_widths3 = np.array(len_widths3)
+
+        # find also # of bursts
+        idx2 = np.where(e3==1)[0]
+        diffs = idx2[1:]-idx2[:-1]
+        idx = np.where(diffs>1)[0]
+        n_coincident_bursts = idx.shape[0]  
+
+        plt.figure(figsize=(10,10))
+        # ax = plt.subplot(121)
+        # # show # of coincident bursts as bar plot
+        # plt.bar([0],[n_coincident_bursts], alpha=.5, label="n_coincident_bursts")
+        # plt.legend()
+
+        ax = plt.subplot(111)
+        # show the coincident bursts time 
+        bin_width = 5 # 5 x 33msec ~=200ms
+        try:
+            hist1 = np.histogram(len_widths1, bins=np.arange(0, np.max(len_widths1)+1+bin_width, bin_width))
+        except:
+            hist1 = [[0],[0,0]]
+        try:
+            hist2 = np.histogram(len_widths2, bins=np.arange(0, np.max(len_widths2)+1+bin_width, bin_width))
+        except:
+            hist2 = [[0],[0,0]]
+        try:
+            hist3 = np.histogram(len_widths3, bins=np.arange(0, np.max(len_widths3)+1+bin_width, bin_width))
+        except:
+            hist3 = [[0],[0,0]]
+
+        plt.plot(np.hstack(hist1[1][1:])/fps, hist1[0], label="roi1", color='blue')
+        plt.plot(np.hstack(hist2[1][1:])/fps, hist2[0], label="roi2", color='lightblue')
+        plt.plot(np.hstack(hist3[1][1:])/fps, hist3[0], label="co-bursts", color='red')
+
+        plt.legend()
+
+        #
+        plt.xlabel("Burst width (sec)")
+
+        plt.savefig(os.path.join(self.save_dir,'cell_burst_coincidence.png'),dpi=200)
+
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
+
+        np.savez(fname_out,
+                    e1 = e1,
+                    e2 = e2,
+                    e3 = e3,
+                    n_coincident_bursts=n_coincident_bursts,
+                    len_widths1=len_widths1,
+                    len_widths2=len_widths2,
+                    len_widths3=len_widths3)
+
+    #
     def compute_intra_session_cell_burst_histogram_v2(self):
 
         fname_out = os.path.join(self.save_dir, 'cell_burst_histogram_v2.npy')
@@ -1933,10 +2047,10 @@ class ProcessSession():
         plt.xlabel("Time (mins)")
         plt.savefig(os.path.join(self.save_dir,'cell_burst_histogram_v2.png'),dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         np.save(fname_out, burst_array)
 
@@ -1974,10 +2088,10 @@ class ProcessSession():
         plt.xlabel("Time (mins)")
         plt.savefig(os.path.join(self.save_dir,'cell_burst_histogram.png'),dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         np.save(fname_out, burst_array)
 
@@ -1985,7 +2099,7 @@ class ProcessSession():
     #
     def compute_intra_session_reward_histogram(self):
 
-        fname_out = os.path.join(self.save_dir,'intra_session_reward.npy')
+        fname_out = os.path.join(self.save_dir,'intra_session_reward.npz')
 
         if os.path.exists(fname_out) and self.recompute_session==False:
             return
@@ -2022,12 +2136,13 @@ class ProcessSession():
         plt.title(self.animal_id +  " -- " + self.session_id)
         plt.savefig(os.path.join(self.save_dir,'intra_session_reward.png'),dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
+
         #
-        np.save(fname_out,y   )
+        np.savez(fname_out, xx=xx, yy=yy)
 
 
     #
@@ -2097,10 +2212,11 @@ class ProcessSession():
         plt.title(self.animal_id +  " -- " + self.session_id)
         plt.savefig(os.path.join(self.save_dir,'intra_session_reward_hist_per_minute.png'),dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
+
         #
         np.save(fname_out,yy)
 
@@ -2151,10 +2267,11 @@ class ProcessSession():
                                           self.animal_id)
         plt.savefig(os.path.join(self.save_dir_root,'average_hit_rate.png'),dpi=200)
 
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        
+        plt.close()
         #
         np.save(os.path.join(self.save_dir,'average_hit_rate.npy'),yy)
 
@@ -2163,6 +2280,10 @@ class ProcessSession():
     def compute_correlograms_ensembles_upphase(self):
 
         from correlograms_phy import correlograms
+        fname_out = os.path.join(self.save_dir,'correlograms_upphase.npy')
+
+        if os.path.exists(fname_out) and self.recompute_session==False:
+            return
 
         self.sample_rate = 30  # in Hz
         self.bin_size = 1  # in seconds
@@ -2239,16 +2360,163 @@ class ProcessSession():
                 plt.ylim(bottom=0)
 
         plt.savefig(os.path.join(self.save_dir,'correlograms_upphase.png'),dpi=200)
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        plt.close()
 
         #
-        np.save(os.path.join(self.save_dir,'correlograms_upphase.npy'),corr)
+        np.save(fname_out,corr)
+
+
+
+    def compute_correlograms_ensembles_upphase2(self):
+
+        ''' Same as above but using lag correlation approach
+        '''
+
+        def cross_correlation(ts1, ts2, lag_range):
+            """
+            Compute the cross-correlation between two time series for different lags.
+
+            Parameters:
+            - ts1: First time series as a numpy array.
+            - ts2: Second time series as a numpy array, should be the same length as ts1.
+            - lag_range: The range of lags to compute the cross-correlation for.
+
+            Returns:
+            - A list of cross-correlation values corresponding to each lag.
+            """
+            mean_ts1 = np.mean(ts1)
+            mean_ts2 = np.mean(ts2)
+            std_ts1 = np.std(ts1)
+            std_ts2 = np.std(ts2)
+            corr_values = []
+            for lag in trange(-lag_range, lag_range + 1):
+                if lag < 0:
+                    corr = np.corrcoef(ts1[:lag], ts2[-lag:])[0, 1]
+                elif lag > 0:
+                    corr = np.corrcoef(ts1[lag:], ts2[:-lag])[0, 1]
+                else:
+                    corr = np.corrcoef(ts1, ts2)[0, 1]
+                corr_values.append(corr)
+            return corr_values
+
+
+        from correlograms_phy import correlograms
+        fname_out = os.path.join(self.save_dir,'correlograms_upphase.npy')
+
+        if os.path.exists(fname_out) and self.recompute_session==False:
+            return
+
+        self.sample_rate = 30  # in Hz
+        self.bin_size = 1  # in seconds
+
+        # # rewarded times
+        # std_threshold = 5
+
+        # #
+        # self.spikes_E10 = np.where(self.F_upphase_bin[0] == 1)[0]
+
+        # #
+        # self.spikes_E11 = np.where(self.F_upphase_bin[1] == 1)[0]
+
+        # #
+        # self.spikes_E20 = np.where(self.F_upphase_bin[2] == 1)[0]
+
+        # #
+        # self.spikes_E21 = np.where(self.F_upphase_bin[3] == 1)[0]
+
+
+        # # MAKE SPIKE TIMES
+
+        # #self.E1_spikes = self.ttl_times[self.reward_times]
+        # spike_times = np.hstack((
+        #     self.spikes_E10,
+        #     self.spikes_E11,
+        #     self.spikes_E20,
+        #     self.spikes_E21))
+        
+
+        # # sort them for the correlogram function below
+        # idx = np.argsort(spike_times)
+        # spike_times = spike_times[idx]
+
+        # spike_times = spike_times/self.sample_rate
+        # #print ("spike times: ", spike_times)
+
+        # # MAKE SPIKE CLUSTERS
+        # spike_clusters = np.int32(np.hstack((
+        #     np.zeros(self.spikes_E10.shape[0]),
+        #     np.zeros(self.spikes_E11.shape[0]) + 1,
+        #     np.zeros(self.spikes_E20.shape[0]) + 2,
+        #     np.zeros(self.spikes_E21.shape[0]) + 3)
+        # ))
+
+        # spike_clusters = np.int32(spike_clusters[idx])
+
+        # # THIS IS NOT REQUIRED ?!
+        # soft_assignment = np.ones(spike_times.shape[0])
+
+        # RUN FUNCTION
+        # corr = correlograms(spike_times,
+        #                     spike_clusters,
+        #                     soft_assignment,
+        #                     cluster_ids=np.arange(4),
+        #                     sample_rate=self.sample_rate,
+        #                     bin_size=self.bin_size,
+        #                     window_size=self.corr_window)
+
+        #
+        lag_range = self.window*self.sample_rate
+        corr = [[],[],[],[]]
+        idxs=[]
+        for k in range(4):
+            for p in range(4):
+                idxs.append([k,p])
+        
+        #
+        import parmap
+        traces = self.F_upphase_bin.copy()
+        corr = parmap.map(cross_correlation3, 
+                          idxs, 
+                          traces,
+                          lag_range, 
+                          pm_processes=16)
+
+        plt.figure(figsize=(15,10))
+        titles = ['roi1', 'roi2', 'roi3', 'roi4']
+        t = np.arange(-lag_range, lag_range, 1)/self.sample_rate
+
+        #
+        ctr=0
+        for k in range(4):
+            for p in range(k,4,1):
+                idx = idxs[ctr]
+                k,p = idx[0], idx[1]
+                temp = corr[ctr]
+
+                #
+                plt.subplot(4, 4, k*4 + p+1)
+                plt.plot(t, temp, label=titles[k] + " vs " + titles[p])
+                plt.legend()
+                plt.xlabel("Time (sec)")
+                plt.xlim(t[0], t[-1])
+                plt.ylim(bottom=0)
+
+                ctr+=1
+
+        #
+        plt.savefig(os.path.join(self.save_dir,'correlograms_upphase.png'),dpi=200)
+        plt.close()
+
+        #
+        np.save(fname_out,corr)
+
 
     #
     def compute_correlograms_ensembles_fluorescence(self):
+
+        fname_out = os.path.join(self.save_dir,'correlograms_fluorescence.json')
+        if os.path.exists(fname_out) and self.recompute_session==False:
+            return
 
         from scipy import stats
 
@@ -2263,7 +2531,7 @@ class ProcessSession():
         self.window = self.window_size*self.sample_rate
 
         #
-        plt.figure()
+        plt.figure(figsize=(12,12))
         t=np.arange(-self.window, self.window, 1)/self.sample_rate
         cc_array = []
         for k in range(4):
@@ -2285,7 +2553,6 @@ class ProcessSession():
                 #print (k,p, 'cc: ', len(cc), "t: ", len(t))
                 cc_array[k][p]=cc
                 #
-                #print (k*4+p)
                 plt.subplot(4,4,k*4+p+1)
                 plt.plot(t, cc)
 
@@ -2313,14 +2580,18 @@ class ProcessSession():
         plt.savefig(os.path.join(self.save_dir, 'correlograms_fluorescence.png'), dpi=200)
 
         #
-        plt.show()
+        #plt.show()
 
         if self.show_plots==False:
             plt.close()
         #
-        np.save(os.path.join(self.save_dir,'correlograms_fluorescence.npy'),cc_array)
 
 
+        # Assuming `cc_array` is your list of lists
+        with open(fname_out, 'w') as f:
+            json.dump(cc_array, f)
+            
+    #
     def correlograms_inter_session_early_vs_late(self):
 
         from scipy import stats
@@ -2333,7 +2604,7 @@ class ProcessSession():
         names = ["roi1", "roi2","roi3","roi4",]
 
         #
-        plt.figure()
+        plt.figure(figsize=(12,12))
         t=np.arange(-self.window*self.sample_rate, self.window*self.sample_rate, 1)/30.
         cc_array = []
 
@@ -2346,9 +2617,8 @@ class ProcessSession():
         ymaxs = np.zeros((4,4))
         ymins = np.zeros((4,4))
 
-
+        #
         for k in range(4):
-            max_y = 0
             for p in range(k,4,1):
 
                 early = []
@@ -2356,14 +2626,12 @@ class ProcessSession():
                 for session_id in tqdm(self.session_ids[1:], desc='loading data for hit rate per session'):
 
                     #
-                    cc = np.load(os.path.join(self.root_dir,
-                                      self.animal_id,
-                                      session_id,
-                                      'results',
-                                      'correlograms_fluorescence.npy'), allow_pickle=True)
-            
+                    cc = self.load_corrs_from_json_flurescence(session_id)
+
+                    #
                     y = cc[k][p]
 
+                    #
                     if session_id in self.early:
                         early.append(y)
                     else:
@@ -2432,10 +2700,10 @@ class ProcessSession():
                     
             ctr_sess+=1
         plt.suptitle(self.animal_id  + " Raw fluorescence based xcorrelation")
-        #plt.savefig(os.path.join(self.save_dir, 'correlograms_fluorescence.png'), dpi=200)
+        plt.savefig(os.path.join(self.save_dir, 'early_vs_late.png'), dpi=200)
         #import time
         #time.sleep(1)
-        plt.show()
+        plt.close()
 
         #if self.show_plots==False:
         #    plt.close()
@@ -2443,9 +2711,28 @@ class ProcessSession():
         #np.save(os.path.join(self.save_dir,'correlograms_fluorescence.npy'),cc_array, allow_pickle=True)
 
     #
+    def load_corrs_from_json_flurescence(self, session_id):
+        with open(os.path.join(self.root_dir,
+                                self.animal_id,
+                                session_id,
+                                'results',
+                                'correlograms_fluorescence.json')) as f:
+            cc = json.load(f)
+        return cc
 
     #
-    def correlograms_inter_session(self):
+    def load_corrs_upphase(self, session_id):
+        fname = os.path.join(self.root_dir,
+                                self.animal_id,
+                                session_id,
+                                'results',
+                                'correlograms_upphase.npy')
+        
+        cc = np.load(fname, allow_pickle=True)
+        return cc
+    
+    #
+    def correlograms_inter_session_fluorescence(self):
 
         from scipy import stats
 
@@ -2457,7 +2744,7 @@ class ProcessSession():
         names = ["roi1", "roi2","roi3","roi4",]
 
         #
-        plt.figure()
+        plt.figure(figsize=(12,12))
         t=np.arange(-self.window*self.sample_rate, self.window*self.sample_rate, 1)/30.
         cc_array = []
 
@@ -2467,13 +2754,9 @@ class ProcessSession():
         for session_id in tqdm(self.session_ids[1:], desc='loading data for hit rate per session'):
 
             #
-            cc = np.load(os.path.join(self.root_dir,
-                                      self.animal_id,
-                                      session_id,
-                                      'results',
-                                      'correlograms_fluorescence.npy'), allow_pickle=True)
-           # print ("cc : ", cc)
-            print ("Length of cc: ", len(cc), len(cc[0]))
+            cc = self.load_corrs_from_json_flurescence(session_id)
+
+            #
             ctr=0
             for k in range(4):
                 max_y = 0
@@ -2489,10 +2772,12 @@ class ProcessSession():
                     
                     #print ("y: ", y.shape, ", t: ", t.shape)
                     if k==0 and p==0:
-                        plt.plot(t, y, color=colors[ctr_sess], label=session_id)
+                        plt.plot(t, y, color=colors[ctr_sess], label=session_id,
+                                 alpha=0.6)
                         plt.legend(fontsize=8)
                     else:
-                        plt.plot(t,y, color=colors[ctr_sess])
+                        plt.plot(t,y, color=colors[ctr_sess],
+                                 alpha=0.6)
 
 
                     ctr+=1
@@ -2510,25 +2795,101 @@ class ProcessSession():
                             [0,0],
                             '--',c='grey')
 
-                        
-                # plt.plot([0,0],
-                #          [0,max_y],
-                #          '--',c='grey')
-
-                #plt.ylim(0, max_y)
-                    
+                    # plot a vertical line at zero
+                    plt.plot([0,0],
+                            [np.min(y),np.max(y)],
+                            '--',c='grey')
                     
             ctr_sess+=1
         plt.suptitle(self.animal_id  + " Raw fluorescence based xcorrelation")
-        #plt.savefig(os.path.join(self.save_dir, 'correlograms_fluorescence.png'), dpi=200)
+        plt.savefig(os.path.join(self.save_dir, 'correlograms_fluorescence.png'), dpi=200)
         #import time
         #time.sleep(1)
-        plt.show()
+        plt.close()
 
-        #if self.show_plots==False:
-        #    plt.close()
+    #
+    def correlograms_inter_session_upphase(self):
+
+        from scipy import stats
+
+        self.sample_rate = 30  # in Hz
+        self.bin_size = 1  # in seconds
+
+        # rewarded times
+        std_threshold = 5
+        names = ["roi1", "roi2","roi3","roi4",]
+
         #
-        #np.save(os.path.join(self.save_dir,'correlograms_fluorescence.npy'),cc_array, allow_pickle=True)
+        plt.figure(figsize=(12,12))
+        cc_array = []
+
+        # 
+        colors = plt.cm.viridis(np.linspace(0, 1, len(self.session_ids)))
+        ctr_sess =0
+        for session_id in tqdm(self.session_ids[1:], desc='loading data for hit rate per session'):
+
+            #
+            cc_temp = self.load_corrs_upphase(session_id)
+
+            # remake these as they are stored in linear fashion
+            cc = []
+            ctr=0
+            for k in range(4):
+                cc.append([])
+                for p in range(4):
+                    cc[k].append(cc_temp[ctr])
+                    ctr+=1
+
+            # 
+            ctr=0
+            for k in range(4):
+                max_y = 0
+                for p in range(k,4,1):
+                    
+                    #
+                    plt.subplot(4,4,k*4+p+1)
+
+                    #
+                    y = cc[k][p]
+                    t=(np.arange(y.shape[0])-y.shape[0]//2)/self.sample_rate 
+
+                    #print ("y: ", y.shape, ", t: ", t.shape)
+                    if k==0 and p==0:
+                        plt.plot(t,y, color=colors[ctr_sess], label=session_id,
+                                 alpha=0.6)
+                        plt.legend(fontsize=8)
+                    else:
+                        plt.plot(t,y, color=colors[ctr_sess],
+                                 alpha=0.6)
+
+
+                    ctr+=1
+
+                    plt.title(names[k] + " vs " +names[p])
+                    plt.xlim(t[0],t[-1])
+                    if p!=k:
+                        plt.xticks([])
+                    else:
+                        plt.xlabel("Time (sec)")
+                    #plt.ylim(bottom=0)
+
+                     # plot a horizontal line at zero
+                    plt.plot([t[0],t[-1]],
+                            [0,0],
+                            '--',c='grey')
+                    
+                    # plot a vertical line at zero
+                    plt.plot([0,0],
+                            [np.min(y),np.max(y)],
+                            '--',c='grey')
+
+                    
+            ctr_sess+=1
+        plt.suptitle(self.animal_id  + " Upphase based xcorrelation")
+        plt.savefig(os.path.join(self.save_dir, 'correlograms_upphase.png'), dpi=200)
+        #import time
+        #time.sleep(1)
+        plt.close()
 
     #
     def binarize_ensembles(self):
@@ -2645,10 +3006,10 @@ class ProcessSession():
         plt.savefig(os.path.join(self.save_dir, 'binarized_traces.png'), dpi=200)
 
         #
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        #     plt.close()
 
 
 
@@ -2663,6 +3024,8 @@ class ProcessSession():
                                self.animal_id)
             
             S.session_id = session_id
+            S.skip_dict = True
+
             #
             S.verbose=self.verbose
             S.load_data()
@@ -2714,14 +3077,14 @@ class ProcessSession():
         plt.legend()
         plt.suptitle(self.animal_id)
 
-        plt.savefig(os.path.join(self.save_dir_root,
+        plt.savefig(os.path.join(self.save_dir,
                                 'n_rewards_intra_session.png'), dpi=200)
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
-        np.save(os.path.join(self.save_dir_root,'n_rewards_intra_session.npy'),mean)
+        np.save(os.path.join(self.save_dir,'n_rewards_intra_session.npy'),mean)
 
 
     def n_rewards_intra_session_normalized(self):
@@ -2795,14 +3158,14 @@ class ProcessSession():
         plt.legend()
         plt.suptitle(self.animal_id)
 
-        plt.savefig(os.path.join(self.save_dir_root,
+        plt.savefig(os.path.join(self.save_dir,
                                 'n_rewards_intra_session_normalized.png'), dpi=200)
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
-        np.save(os.path.join(self.save_dir_root,'n_rewards_intra_session_normalized.npy'), mean)
+        np.save(os.path.join(self.save_dir,'n_rewards_intra_session_normalized.npy'), mean)
 
     #
     def hit_rate_per_session(self):
@@ -2847,24 +3210,128 @@ class ProcessSession():
         plt.legend()
         plt.suptitle(self.animal_id)
 
-        self.save_dir_root = os.path.join(self.root_dir,
-                                          self.animal_id)
-        plt.savefig(os.path.join(self.save_dir_root,
+        #self.save_dir_root = os.path.join(self.root_dir,
+        #                                  self.animal_id)
+        plt.savefig(os.path.join(self.save_dir,
                                  'hit_rates.png'), dpi=200)
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
-        np.save(os.path.join(self.save_dir_root, 'hit_Rates.npy'), hit_rates)
+        np.save(os.path.join(self.save_dir, 'hit_Rates.npy'), hit_rates)
+
+
+    def make_all_plots(self):
+
+        #
+        self.n_rewards_per_session()
+
+        self.show_plots=True
+        self.hit_rate_per_session()
+
+        #
+        self.verbose=False
+        self.window = 30   # in seconds
+        self.correlograms_inter_session_fluorescence()
+
+        #
+        self.correlograms_inter_session_upphase()
+
+        #
+        self.verbose=False
+        self.window = 30   # in seconds
+        self.correlograms_inter_session_early_vs_late()
+
+        #
+        self.n_bursts_per_session()
+
+        #
+        self.burst_durations_per_session()
+
+    #
+    def burst_durations_per_session(self):
+
+        #
+        fps = 30.
+
+        # make discrete color map for burst durations
+        cmap = plt.get_cmap('viridis')
+        colors = cmap(np.linspace(0, 1, len(self.session_ids)-1))
+
+
+        #
+        plt.figure(figsize=(10,10))
+        ctr=0
+        for session_id in tqdm(self.session_ids[1:],desc='loading data for burst durations'):
+            S = ProcessSession(self.root_dir,
+                               self.animal_id)
+            #
+            #S.load_data()
+            load_dir = os.path.join(self.root_dir,
+                                         self.animal_id,
+                                         session_id,
+                                         'results')
+
+            d = np.load(os.path.join(load_dir, 'cell_burst_coincidence.npz'))
+
+            len_widths1 = d['len_widths1']
+            len_widths2 = d['len_widths2']
+            len_widths3 = d['len_widths3']
+            n_coincident_bursts=d['n_coincident_bursts']
+
+            #
+
+            bin_width = 30 # 5 x 33msec ~=200ms
+            try:
+                hist1 = np.histogram(len_widths1, bins=np.arange(0, np.max(len_widths1)+1+bin_width, bin_width))
+            except:
+                hist1 = [[0],[0,0]]
+            try:
+                hist2 = np.histogram(len_widths2, bins=np.arange(0, np.max(len_widths2)+1+bin_width, bin_width))
+            except:
+                hist2 = [[0],[0,0]]
+            try:
+                hist3 = np.histogram(len_widths3, bins=np.arange(0, np.max(len_widths3)+1+bin_width, bin_width))
+            except:
+                hist3 = [[0],[0,0]]
+
+            #
+            ax = plt.subplot(2,2,1)
+            plt.plot(np.hstack(hist1[1][1:])/fps, hist1[0], label="roi1", color=colors[ctr])
+            plt.xlabel("Burst width (sec)")
+            plt.title("Pos Ensemble 1")
+
+            ax = plt.subplot(2,2,2)
+            plt.plot(np.hstack(hist2[1][1:])/fps, hist2[0], label="roi2", color=colors[ctr])
+            plt.title("Pos Ensemble 2")
+            plt.xlabel("Burst width (sec)")
+
+            ax = plt.subplot(2,2,3)
+            plt.plot(np.hstack(hist3[1][1:])/fps, hist3[0], label="roi3", color=colors[ctr])
+            plt.title("Width of coincident bursts")
+            plt.xlabel("Burst width (sec)")
+
+            #
+            ax = plt.subplot(2,2,4)
+            # bar plot of n_coincident_bursts
+            plt.bar(ctr, n_coincident_bursts, 0.9, color='black', alpha=.5)
+            plt.title("# coincident bursts")
+
+            #
+            ctr+=1
+
+        # 
+        plt.suptitle(self.animal_id)
+        plt.savefig(os.path.join(self.save_dir,
+                                'burst_durations_per_session.png'), dpi=200)
+        plt.close()
 
 
     def n_rewards_per_session(self):
         
-        self.save_dir_root = os.path.join(self.root_dir,
-                                          self.animal_id)
-                
-        fname_out = os.path.join(self.save_dir_root,'n_rewards_per_session.npy')
+        #                
+        fname_out = os.path.join(self.save_dir,'n_rewards_per_session.npy')
 
         if os.path.exists(fname_out):
             print ("Loading n_rewards_per_session.npy")
@@ -2881,9 +3348,10 @@ class ProcessSession():
             ctr=0
             for session_id in tqdm(self.session_ids[1:],desc='loading data for n_rewards_per_session'):
                 S = ProcessSession(self.root_dir,
-                                self.animal_id)
+                                   self.animal_id)
                 #
                 S.verbose = self.verbose
+                S.skip_dict = True
 
                 #
                 S.session_id = session_id
@@ -2931,12 +3399,12 @@ class ProcessSession():
         plt.suptitle(self.animal_id)
 
 
-        plt.savefig(os.path.join(self.save_dir_root,
+        plt.savefig(os.path.join(self.save_dir,
                                 'n_rewards_per_session.png'), dpi=200)
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         np.save(fname_out,yy)
 
@@ -2947,17 +3415,18 @@ class ProcessSession():
         labels = []
         bursts_all = []
 
+        #
         for session_id in tqdm(self.session_ids[1:],desc='loading data for n_bursts_per_session'):
             S = ProcessSession(self.root_dir,
                                self.animal_id)
             #
             #S.load_data()
-            self.save_dir = os.path.join(self.root_dir,
+            load_dir = os.path.join(self.root_dir,
                                          self.animal_id,
                                          session_id,
                                          'results')
 
-            burst_array = np.load(os.path.join(self.save_dir, 'cell_burst_histogram_v2.npy'))
+            burst_array = np.load(os.path.join(load_dir, 'cell_burst_histogram_v2.npy'))
 
             bursts_all.append(burst_array)
             #
@@ -2968,7 +3437,7 @@ class ProcessSession():
 
         ########################################################
         import matplotlib.pyplot as plt
-        plt.figure()
+        plt.figure(figsize=(12,12))
         names = ['roi1','roi2','roi3','roi4']
         clrs = ['blue','red']
         for k in range(4):
@@ -3005,14 +3474,12 @@ class ProcessSession():
 
         plt.suptitle(self.animal_id)
 
-        plt.savefig(os.path.join(self.save_dir_root,
+        plt.savefig(os.path.join(self.save_dir,
                                  'n_bursts_per_session.png'), dpi=200)
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
-
-
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
         #########################################################
         #########################################################
@@ -3060,11 +3527,38 @@ class ProcessSession():
 
 
         #
-        plt.savefig(os.path.join(self.save_dir_root,
+        plt.savefig(os.path.join(self.save_dir,
                                  'n_bursts_per_session2.png'), dpi=200)
-        if self.show_plots:
-            plt.show()
-        else:
-            plt.close()
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
 
 #
+        
+def cross_correlation3(idx,
+                F_upphase_bin,
+                lag_range):
+    from scipy import stats
+    """
+    Compute the cross-correlation between two time series for different lags.
+
+    Parameters:
+    - ts1: First time series as a numpy array.
+    - ts2: Second time series as a numpy array, should be the same length as ts1.
+    - lag_range: The range of lags to compute the cross-correlation for.
+
+    Returns:
+    - A list of cross-correlation values corresponding to each lag.
+    """
+
+    t1 = F_upphase_bin[idx[0]]
+    t2 = F_upphase_bin[idx[1]]
+
+    #  #
+    cc = []
+    for z in range(-lag_range,lag_range,1):
+        cc.append(stats.pearsonr(np.roll(t1,z), t2)[0])
+
+    #   
+    return np.hstack(cc)

@@ -10,12 +10,30 @@
 #------------------------------------------------------------------------------
 
 import numpy as np
+from numpy import int32, int64, float64
 from six import string_types, integer_types
 
-_ACCEPTED_ARRAY_DTYPES = (np.float, np.float32, np.float64,
-                          np.int, np.int8, np.int16, np.uint8, np.uint16,
-                          np.int32, np.int64, np.uint32, np.uint64,
-                          np.bool)
+# _ACCEPTED_ARRAY_DTYPES = (np.float, np.float32, np.float64,
+#                           np.int, np.int8, np.int16, np.uint8, np.uint16,
+#                           np.int32, np.int64, np.uint32, np.uint64,
+#                           np.bool)
+
+_ACCEPTED_ARRAY_DTYPES = (
+    float,  # instead of np.float
+    #np.float32,
+    #np.float64,
+    int,  # instead of np.int
+    #np.int8,
+    #np.int16,
+    #np.uint8,
+    #np.uint16,
+    #np.int32,
+    #np.int64,
+    #np.uint32,
+    #np.uint64,
+    bool  # instead of np.bool
+)
+
 
 def _index_of(arr, lookup):
     """Replace scalars in an array by their indices in a lookup table.
@@ -28,9 +46,9 @@ def _index_of(arr, lookup):
     # TODO: assertions to disable in production for performance reasons.
     # TODO: np.searchsorted(lookup, arr) is faster on small arrays with large
     # values
-    lookup = np.asarray(lookup, dtype=np.int32)
+    lookup = np.asarray(lookup, dtype=int32)
     m = (lookup.max() if len(lookup) else 0) + 1
-    tmp = np.zeros(m + 1, dtype=np.int)
+    tmp = np.zeros(m + 1, dtype=int)
     # Ensure that -1 values are kept.
     tmp[-1] = -1
     if len(lookup):
@@ -43,7 +61,7 @@ def _unique(x):
     It is only faster if len(x) >> len(unique(x)).
     """
     if x is None or len(x) == 0:
-        return np.array([], dtype=np.int64)
+        return np.array([], dtype=int64)
     # WARNING: only keep positive values.
     # cluster=-1 means "unclustered".
     x = _as_array(x)
@@ -145,8 +163,8 @@ def correlograms(spike_times,
                                                "increasing.")
 
     # Get the spike samples.
-    spike_times = np.asarray(spike_times, dtype=np.float64)
-    spike_samples = (spike_times * sample_rate).astype(np.int64)
+    spike_times = np.asarray(spike_times, dtype=float64)
+    spike_samples = (spike_times * sample_rate).astype(int64)
     
     spike_clusters = _as_array(spike_clusters)
 
@@ -180,7 +198,7 @@ def correlograms(spike_times,
 
     # At a given shift, the mask precises which spikes have matching spikes
     # within the correlogram time window.
-    mask = np.ones_like(spike_samples, dtype=np.bool)
+    mask = np.ones_like(spike_samples, dtype=bool)
 
     correlograms = _create_correlograms_array(n_clusters, winsize_bins)
 
