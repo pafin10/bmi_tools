@@ -208,6 +208,7 @@ class ProcessCohort():
         plt.suptitle(self.cohort_name + " hit-rate", fontsize=20)
 
         plt.savefig(os.path.join(self.root_dir,
+                                 'results',
                                     'cohort_hit_rates.png'), dpi=200)
         
 
@@ -217,8 +218,9 @@ class ProcessCohort():
         # plt.suptitle(self.cohort_name + " hit-rate")
 
 
-        plt.savefig(os.path.join(self.root_dir,
-                                 'cohort_hit_rates.png'), dpi=200)
+        # plt.savefig(os.path.join(self.root_dir,
+        #                          'results'
+        #                          'cohort_hit_rates.png'), dpi=200)
 
         # if self.show_plots:
         #     plt.show()
@@ -226,10 +228,160 @@ class ProcessCohort():
         plt.close()
 
         # save nested list as numpy array
-        fname = os.path.join(self.root_dir,
-                            'cohort_hit_rates.npy')
+        # fname = os.path.join(self.root_dir,
+        #                      'results',
+        #                     'cohort_hit_rates.npy')
         
         #np.save(fname, hit_rates, allow_pickle=True)
+
+    #
+    def n_cells_per_session(self):  
+        
+        #
+        n_cells_m1 = []
+        n_cells_ca3 = []
+        rec_types = []
+        n_cells = []
+
+        #
+        for animal_id in self.animal_ids:
+
+            #
+            S = ProcessSession(self.root_dir,
+                                 animal_id)
+            
+            #
+            rec_types.append(S.rec_type)
+            
+            #
+            n_cell = []        
+            for session_id in S.session_ids[1:9]:
+
+                try:
+                    iscell = np.load(os.path.join(self.root_dir,
+                                            animal_id,
+                                            session_id,
+                                            'plane0',
+                                            'iscell.npy'))
+                    
+                #                    
+                except:
+                    print ('missing...')
+                    iscell = np.zeros()+np.nan
+
+
+            #
+                n_cell.append(iscell.shape[0])
+
+            #
+            n_cells.append(np.array(n_cell))
+
+        # plot
+        plt.figure(figsize=(25,10))
+
+        # grab the first 2 and last 2 sessions of each of the hit_rates_m1 sessions
+        plt.title("M1 mice")
+        for ctr, animal_id in enumerate(self.animal_ids):
+
+            if rec_types[ctr]=='m1':
+                ax=plt.subplot(1,2,1)
+                plt.title("M1")
+                plt.xlabel("Session #")
+                plt.ylabel("# of cells")
+                #plt.ylim(bottom=0)
+            else:
+                ax=plt.subplot(1,2,2)
+                plt.title("CA3")
+                plt.xlabel("Session #")
+                plt.ylabel("# of cells")
+                #plt.ylim(bottom=0)
+
+            #
+            ax.plot(np.arange(n_cells[ctr].shape[0]), 
+                     n_cells[ctr], 
+                     alpha=.7, 
+                     linewidth=5,
+                     label = animal_id
+                     )
+            plt.legend()
+
+
+        plt.show()        
+
+
+    def n_rewards_per_session(self):  
+        
+        #
+        n_cells_m1 = []
+        n_cells_ca3 = []
+        rec_types = []
+        n_rews = []
+
+        #
+        for animal_id in self.animal_ids:
+
+            #
+            S = ProcessSession(self.root_dir,
+                                 animal_id)
+            
+            #
+            rec_types.append(S.rec_type)
+            
+            #
+            n_rew = []        
+            for session_id in S.session_ids[1:9]:
+
+                try:
+                    results = np.load(os.path.join(self.root_dir,
+                                        animal_id,
+                                        session_id,
+                                        'data',
+                                        'results.npz'), allow_pickle=True)
+                    reward_times = results['rewarded_times_abs']
+                    n_rew.append(reward_times.shape[0])
+            #                    
+                except:
+                    print ('missing...')
+                    n_rew.append(np.nan)
+
+
+            #
+                #n_rews.append(n_rew.shape[0])
+
+            #
+            n_rews.append(np.array(n_rew))
+
+        # plot
+        plt.figure(figsize=(25,10))
+
+        # grab the first 2 and last 2 sessions of each of the hit_rates_m1 sessions
+        plt.title("M1 mice")
+        for ctr, animal_id in enumerate(self.animal_ids):
+
+            if rec_types[ctr]=='m1':
+                ax=plt.subplot(1,2,1)
+                plt.title("M1")
+                plt.xlabel("Session #")
+                plt.ylabel("# of rewards")
+                #plt.ylim(bottom=0)
+            else:
+                ax=plt.subplot(1,2,2)
+                plt.title("CA3")
+                plt.xlabel("Session #")
+                plt.ylabel("# of rewards")
+                #plt.ylim(bottom=0)
+
+            #
+            ax.plot(np.arange(n_rews[ctr].shape[0]), 
+                     n_rews[ctr], 
+                     alpha=.7, 
+                     linewidth=5,
+                     label = animal_id
+                     )
+            plt.legend()
+
+
+        plt.show()      
 
     #
     def cohort_hit_rate_early_vs_late_ca3_vs_m1(self):
@@ -267,9 +419,9 @@ class ProcessCohort():
                 hit_array.append(hits_per_5min)
             
             #
-            if S.rec_type[0]=='m1':
+            if S.rec_type=='m1':
                 hit_rates_m1.append(hit_array)
-            elif S.rec_type[0]=='ca3':
+            elif S.rec_type=='ca3':
                 hit_rates_ca3.append(hit_array)
 
 
@@ -397,10 +549,10 @@ class ProcessCohort():
         for k in range(len(hit_rates)):
             
             #
-            plt.subplot(2,5,k+1)
+            plt.subplot(3,5,k+1)
 
             # plot title as animal_id and also rec type
-            plt.title(self.animal_ids[k] + " " + rec_types[k][0])
+            plt.title(self.animal_ids[k] + " " + str(rec_types[k]))
 
             # plot yalbel as hit rate
             plt.ylabel("% hit rate", fontsize=10)
@@ -481,10 +633,10 @@ class ProcessCohort():
         ax1=plt.subplot(1,2,1)
         ax2=plt.subplot(1,2,2)
 
-        line_styles = ['-', '--', ':', '-.', (0, (5, 2)), (0, (1, 1)), (0, (3, 1, 1, 1)), (0, (3, 2, 1, 2))]
+        line_styles = ['-', '--', '-', '--','-', '--','-', '--','-', '--','-', '--','-', '--',]
         
         clrs = ['black','red']
-        clrs_m1 = ['green','darkgreen','lightseagreen','blue','navy','royalblue','darkblue','lightblue']
+        clrs_m1 = ['green','darkgreen','lightseagreen','blue','navy','royalblue','darkblue','lightblue','brown','indigo']
         clrs_ca3 = ['red','darkred','lightcoral','orange','gold','pink']
         clrs = ['black','red', 'blue', 'green', 'orange', 'purple', 'pink', 'brown']
         ctr_m1 = 0
@@ -503,7 +655,7 @@ class ProcessCohort():
             while len(temp)<8:
                 temp = np.hstack((temp,np.nan))
                             #
-            if rec_types[k][0]=='m1':
+            if rec_types[k]=='m1':
                 #
                 ave_m1.append(temp)
 
@@ -512,10 +664,10 @@ class ProcessCohort():
                         linewidth = 5,
                         linestyle = line_styles[ctr_m1],
                         c=clrs_m1[ctr_m1],
-                        label = self.animal_ids[k] + " " + rec_types[k][0]
+                        label = self.animal_ids[k] + " " + str(rec_types[k])
                         )
                 ctr_m1+=1
-            elif rec_types[k][0]=='ca3':
+            elif rec_types[k]=='ca3':
                 ave_ca3.append(temp)
                 
                 ax2.plot(x,hit_rates[k],
@@ -523,7 +675,7 @@ class ProcessCohort():
                         linewidth = 5,
                         linestyle = line_styles[ctr_ca3],
                         c=clrs_ca3[ctr_ca3],
-                        label = self.animal_ids[k] + " " + rec_types[k][0]
+                        label = self.animal_ids[k] + " " + str(rec_types[k])
                         )
                 ctr_ca3+=1
             else:
@@ -598,19 +750,17 @@ class ProcessCohort():
         plt.suptitle(self.cohort_name + " hit-rate", fontsize=20)
 
         plt.savefig(os.path.join(self.root_dir,
-                                    'cohort_hit_rates.png'), dpi=200)
+                                    'cohort_hit_rates_per_minute.png'), dpi=200)
 
 
-        plt.savefig(os.path.join(self.root_dir,
-                                 'cohort_hit_rates.png'), dpi=200)
 
         # if self.show_plots:
         #     plt.show()
         # else:
         plt.close()
 
-        np.save(os.path.join(self.root_dir,
-                            'cohort_hit_rates.npy'), hit_rates)
+        #np.save(os.path.join(self.root_dir,
+         #                   'cohort_hit_rates_per_minute.npy'), hit_rates)
 
     # #
     # def cohort_hit_rate_early_vs_late(self):
@@ -1225,26 +1375,34 @@ class ProcessSession():
 
         #
         x = np.arange(2)
-        #
+        
+        # show violin plots 
+        
+        # jitter the x location
         plt.bar(0,np.mean(early),width=0.9,
-                color='mediumturquoise',alpha=1, edgecolor='black',linewidth=5)
+                color='mediumturquoise',alpha=0.5, edgecolor='black',linewidth=5)
 
-        plt.scatter(np.zeros(early.shape[0]), early,
+        # jitter the x location
+        plt.scatter(np.zeros(early.shape[0])+np.random.normal(0,0.1,early.shape[0]),
+                    early,
                     edgecolor='black',
                     c='mediumturquoise', label="ttest statistic: "+str(round(res[0],3))+
                     ", ttest pval: "+str(round(res[1],5)))
 
         ################################
         plt.bar(1, np.mean(late), width=0.9,
-                color='royalblue', alpha=1, edgecolor='black',linewidth=5)
-        plt.scatter(np.zeros(early.shape[0])+1, late,edgecolor='black',
+                color='royalblue', alpha=0.5, edgecolor='black',linewidth=5)
+        
+        plt.scatter(np.ones(late.shape[0])+np.random.normal(0,0.1,late.shape[0]),
+                    late,
+                    edgecolors='black',
                     c='royalblue', label="ks test: "+str(round(res_ks[0],3))+
                     ", ks pval: "+str(round(res_ks[1],5)))
 
         plt.legend()
 
 
-
+        plt.suptitle(self.animal_id+ " " +str(self.rec_type))
         #
         plt.xticks(x,xticks)
         plt.ylabel("% hits (every 5min bin)")
@@ -1262,6 +1420,60 @@ class ProcessSession():
         np.save(os.path.join(self.save_dir,
                              'early_vs_late.npy'), [early,late])
 
+
+
+
+    def early_vs_late_distributions_violin(self):
+
+        # load test data
+        early = []
+        for session_id in self.early:
+            d = np.load(os.path.join(self.root_dir,
+                                     self.animal_id,
+                                     session_id,
+                                     'results/intra_session_reward_hits_per_minute.npy'
+                                     ))
+            early.append(d)
+
+        early = np.hstack(early)
+        #print (pre)
+
+        # load contingency degradata
+        late = []
+        for session_id in self.late:
+            d = np.load(os.path.join(self.root_dir,
+                                     self.animal_id,
+                                     session_id,
+                                     'results/intra_session_reward_hits_per_minute.npy'
+                                     ))
+            late.append(d)
+        late = np.hstack(late)
+
+        #
+        plt.figure()
+        xticks = ['Early','Late']
+
+        res = scipy.stats.ttest_ind(early, late)
+        res_ks = scipy.stats.ks_2samp(early, late)
+
+        #
+        x = np.arange(2)
+        
+        # show violin plots for distribution early and late
+        plt.violinplot(early, positions=[0],widths=0.5,showmeans=True,showextrema=True)
+        plt.violinplot(late, positions=[1],widths=0.5,showmeans=True,showextrema=True)
+
+
+        plt.savefig(os.path.join(self.save_dir,
+                                 'early_vs_late_violin.png'), dpi=300)
+
+        # if self.show_plots:
+        #     plt.show()
+        # else:
+        plt.close()
+
+        np.save(os.path.join(self.save_dir,
+                             'early_vs_late_violin.npy'), [early,late])
 
     def early_vs_late_session(self):
 
@@ -1347,50 +1559,58 @@ class ProcessSession():
                              'data', 'results.npz')
         
         #
-        print ("Loading data...")
+        #print ("Loading data...")
         try:
             data = np.load(fname, allow_pickle=True)
         
-            #
-            self.reward_times = np.int32(data['rewarded_times_abs'][:, 1])
-
-
+            ################################################
             self.trials = data['trials']
-            #self.starts_ttl = data['trials'][:, 0]
-            #self.starts_time = data['trials'][:, 1]
             self.ends_ttl = data['trials'][:, 2]
-            #self.ends_time = data['trials'][:, 3]
             self.rewards = data['trials'][:, 4]
 
             #
+            times_of_trials = self.trials
+            idx = np.where(times_of_trials > self.session_duration)[0]
+            self.trials = np.delete(self.trials, idx)
+            self.ends_ttl = np.delete(self.ends_ttl, idx)
+            self.rewards = np.delete(self.rewards, idx)
+
+            ################################################
+            self.reward_times = np.int32(data['rewarded_times_abs'][:, 1])
+            # find reward times > self.session_duration in frame times and remove them
+            idx = np.where(self.reward_times > self.session_duration)[0]
+            self.reward_times = np.delete(self.reward_times, idx)
+
+            ################################################
             try:
                 self.abs_times = data['abs_times_ttl_read']
             except:
                 if self.verbose:
                     print ("missing: ", 'abs_times_ttl_read')
                 self.abs_times = data['abs_times']
+            
 
-            #print ("self.abs_times")
-
+            ################################################
             try:
                 self.ttl_times = data['abs_times_ca_read']
             except:
                 if self.verbose:
                     print ("missing: ", 'abs_times_ca_read')
                 self.ttl_times = data['ttl_times']
+            self.ttl_times = self.ttl_times[:self.session_duration]
 
-
+            ################################################
             self.ttl_comp = data['ttl_n_computed']
+            self.ttl_comp = self.ttl_comp[:self.session_duration]
 
-            #
+
+            ################################################
             self.ttl_det = np.arange(self.ttl_times.shape[0]).astype('int32')
 
             # TODO: Need to lock this to time correctly
             self.lick_detector = data['lick_detector_abstime']
-
             idx = np.where(self.lick_detector > 3)[0]
             self.lick_times = self.abs_times[idx] - self.ttl_times[0]
-            # licks = result[0]/(30*33.425)
 
             #
             self.ttl_times -= self.ttl_times[0]
@@ -1398,13 +1618,13 @@ class ProcessSession():
             #
             self.E1 = data["rois_traces_smooth1"]
             self.E2 = data["rois_traces_smooth2"]
+            self.E1 = self.E1[:, :self.session_duration]
+            self.E2 = self.E2[:, :self.session_duration]
 
 
-            #
+            # zero out first 10 frames, we have usually very large bursts
             self.E1[:, :10] = 0
             self.E2[:, :10] = 0
-
-            #self.E2[1, self.ttl_det]
 
             # old method:
             # self.E = data['ensemble_diff_array']
@@ -1413,13 +1633,15 @@ class ProcessSession():
             #
             self.rec_len_mins = self.E1.shape[1]/self.sample_rate/60.
 
-
             # Setdefault high trehsold and white noise in case they are not saved to xlsx document
             self.high_threshold = data['high_threshold']
             self.high_threshold = self.ttl_times*0 + self.high_threshold
+            self.high_threshold = self.high_threshold[:self.session_duration]
 
+            #
             self.white_noise = self.high_threshold*0
 
+        #
         except:
             print ("Could not load file: ", fname)
             print ("...loading from xlsx file")
@@ -1447,8 +1669,11 @@ class ProcessSession():
 
             #
             self.white_noise = D[:, 2]
+            self.white_noise = self.white_noise[:self.session_duration]
             self.high_threshold = D[:, 1]
+            self.high_threshold = self.high_threshold[:self.session_duration]
             self.ttl_det = np.int32(D[:,0])-1
+            self.ttl_det = self.ttl_det[:self.session_duration]
             post_reward = D[:, 3]
 
             # this is for the rare case when the results.npz file is corrupt
@@ -1462,8 +1687,15 @@ class ProcessSession():
                 idx = np.where(np.diff(self.reward_times) == 1)[0]
                 self.reward_times = idx
 
+                # clip them to session duration
+                idx = np.where(self.reward_times > self.session_duration)[0]
+                self.reward_times = np.delete(self.reward_times, idx)
+
                 print ("reward times: ", self.reward_times)
                 self.rewards = self.reward_times.copy()
+
+                #
+                self.ttl_times = np.arange(self.session_duration)
 
         else:
             if self.verbose:
@@ -1484,11 +1716,13 @@ class ProcessSession():
             print("lick times: ", self.lick_times)
             print("E1 , E2, ", self.E1.shape, self.E2.shape)
 
-
+    #
     def process_session_traces(self):
 
+        #
         fname_out = os.path.join(self.save_dir,'session.png')
-
+        
+        #
         if os.path.exists(fname_out) and self.recompute_session==False:
             #print ("Session already processed, skipping")
             return
@@ -1503,16 +1737,16 @@ class ProcessSession():
         #
         scale = 2
         alpha = .7
-        #plt.plot(self.ttl_times, self.E1[0, self.ttl_comp], c='blue', label='roi1', alpha=alpha)
-        #plt.plot(self.ttl_times, self.E1[1, self.ttl_comp] + scale, c='lightblue', label='roi2', alpha=alpha)
-        #plt.plot(self.ttl_times, self.E2[0, self.ttl_comp] + scale * 2, c='red', label='roi3', alpha=alpha)
-        #plt.plot(self.ttl_times, self.E2[1, self.ttl_comp] + scale * 3, c='pink', label='roi4', alpha=alpha)
+
 
         #
-        plt.plot(self.ttl_times, self.E1[0, self.ttl_det], c='blue', label='roi1', alpha=alpha)
-        plt.plot(self.ttl_times, self.E1[1, self.ttl_det] + scale, c='lightblue', label='roi2', alpha=alpha)
-        plt.plot(self.ttl_times, self.E2[0, self.ttl_det] + scale * 2, c='red', label='roi3', alpha=alpha)
-        plt.plot(self.ttl_times, self.E2[1, self.ttl_det] + scale * 3, c='pink', label='roi4', alpha=alpha)
+        print ("self.ttl_times: ", self.ttl_times.shape)    
+        print ("self.E1: ", self.E1.shape)
+        print ("self.E2: ", self.E2.shape)
+        plt.plot(self.ttl_times, self.E1[0], c='blue', label='roi1', alpha=alpha)
+        plt.plot(self.ttl_times, self.E1[1] + scale, c='lightblue', label='roi2', alpha=alpha)
+        plt.plot(self.ttl_times, self.E2[0] + scale * 2, c='red', label='roi3', alpha=alpha)
+        plt.plot(self.ttl_times, self.E2[1] + scale * 3, c='pink', label='roi4', alpha=alpha)
 
         # total ensemble state
         ctr = 6
@@ -1912,6 +2146,76 @@ class ProcessSession():
         #
         np.save(fname_out, isi_array)
 
+
+    def intra_session_ensembel_trends(self):
+
+
+        # root_dir = '/media/cat/8TB/donato/bmi/'
+        # animal_id = 'DON-015821'
+
+        # load yaml file from this location
+        fname = os.path.join(self.root_dir, self.animal_id, 
+                            str(animal_id)+'.yaml')
+        yam = yaml.load(open(fname, 'r'), Loader=yaml.FullLoader)
+        # grab "session_ids" from yaml file
+        sessions = yam['session_ids']
+
+
+
+        # make color map over 7 discrete viridis
+        cmap = plt.cm.viridis
+        colors = cmap(np.linspace(0, 1, len(sessions)-1))
+        cell_names = ['pos1', 'pos2', 'neg1', 'neg2']
+        #
+        plt.figure(figsize=(8,8))
+        cell_array = [[],[],[],[]]
+        
+        
+        for ctr,session in enumerate(sessions[1:]):
+            fname = os.path.join(root_dir,
+                                animal_id, 
+                                str(session), 
+                                'results',
+                                'cell_burst_histogram_v2.npy')
+            data = np.load(fname, allow_pickle=True)
+            print (data.shape)
+            t = np.arange(6)*5+2.5
+            for k in range(data.shape[0]):
+                ax=plt.subplot(2,2,k+1)
+                plt.plot(t,
+                        data[k],
+                        color=colors[ctr],
+                        linewidth=2,
+                        )
+                
+                plt.title("Cell: "+str(k))
+                cell_array[k].append(data[k])
+
+                # xlabel is increments of 5mins chunks x 6
+                #xticks = np.arange(0, 31, 5)
+                #plt.xticks(xticks/5, xticks)
+
+        # plot also average of all cells
+        for k in range(4):
+            ax=plt.subplot(2,2,k+1)
+            temp = np.array(cell_array[k])
+            temp = temp.mean(0)
+            std = temp.std(0)
+            plt.ylabel("burst rate(5min bins)")
+            plt.plot(t,
+                    temp, 
+                    color='black',
+                    linewidth=2)
+            plt.fill_between(t,
+                            temp-std,
+                            temp+std,
+                            color='black',
+                            alpha=0.2)
+            plt.title("Cell: "+str(cell_names[k]))
+
+        plt.suptitle("Cell burst histograms " + animal_id)
+        plt.show()
+
     #
     def compute_intra_session_coincidence_bursts_positive_ensemble(self):
 
@@ -2072,7 +2376,9 @@ class ProcessSession():
             diffs = temp[1:]-temp[:-1]
             bursts = np.where(diffs==1)[0]/float(self.sample_rate)/60.
 
-            y = np.histogram(bursts, bins=np.arange(0, 65, self.bin_width))
+            y = np.histogram(bursts, bins=np.arange(0, 
+                                                    65, 
+                                                    self.bin_width))
 
             plt.bar(y[1][:-1], y[0], self.bin_width * 0.9, label=names[k],
                     color=clrs[k//2])
@@ -2148,7 +2454,10 @@ class ProcessSession():
     #
     def compute_intra_session_reward_histogram_hist_per_minute(self):
 
-        fname_out = os.path.join(self.save_dir,'intra_session_reward_hits_per_minute.npy')
+        fname_out = os.path.join(self.save_dir,
+                                 'intra_session_reward_hits_per_minute_'
+                                 +str(self.session_duration)
+                                 +'.npy')
 
         if os.path.exists(fname_out) and self.recompute_session==False:
             return
@@ -2186,9 +2495,9 @@ class ProcessSession():
         try:
             res = stats.pearsonr(xx,yy)
         except:
-            # 
-            print ("THIS session has errors in the reward times", self.save_dir)
-            print ("... saving nans array")
+                # 
+            print ("can't compute pcorr")
+            print ("xx, yy: ", xx, yy)
   
             np.save(fname_out,
                     yy*0 + np.nan)
@@ -2210,11 +2519,11 @@ class ProcessSession():
         plt.xlabel("Time (mins)")
         plt.ylabel("% hit rate")
         plt.title(self.animal_id +  " -- " + self.session_id)
-        plt.savefig(os.path.join(self.save_dir,'intra_session_reward_hist_per_minute.png'),dpi=200)
+
+        #
+        plt.savefig(fname_out[:-4]+'.png',dpi=200)
 
         # if self.show_plots:
-        #     plt.show()
-        # else:
         plt.close()
 
         #
@@ -2409,60 +2718,6 @@ class ProcessSession():
         self.sample_rate = 30  # in Hz
         self.bin_size = 1  # in seconds
 
-        # # rewarded times
-        # std_threshold = 5
-
-        # #
-        # self.spikes_E10 = np.where(self.F_upphase_bin[0] == 1)[0]
-
-        # #
-        # self.spikes_E11 = np.where(self.F_upphase_bin[1] == 1)[0]
-
-        # #
-        # self.spikes_E20 = np.where(self.F_upphase_bin[2] == 1)[0]
-
-        # #
-        # self.spikes_E21 = np.where(self.F_upphase_bin[3] == 1)[0]
-
-
-        # # MAKE SPIKE TIMES
-
-        # #self.E1_spikes = self.ttl_times[self.reward_times]
-        # spike_times = np.hstack((
-        #     self.spikes_E10,
-        #     self.spikes_E11,
-        #     self.spikes_E20,
-        #     self.spikes_E21))
-        
-
-        # # sort them for the correlogram function below
-        # idx = np.argsort(spike_times)
-        # spike_times = spike_times[idx]
-
-        # spike_times = spike_times/self.sample_rate
-        # #print ("spike times: ", spike_times)
-
-        # # MAKE SPIKE CLUSTERS
-        # spike_clusters = np.int32(np.hstack((
-        #     np.zeros(self.spikes_E10.shape[0]),
-        #     np.zeros(self.spikes_E11.shape[0]) + 1,
-        #     np.zeros(self.spikes_E20.shape[0]) + 2,
-        #     np.zeros(self.spikes_E21.shape[0]) + 3)
-        # ))
-
-        # spike_clusters = np.int32(spike_clusters[idx])
-
-        # # THIS IS NOT REQUIRED ?!
-        # soft_assignment = np.ones(spike_times.shape[0])
-
-        # RUN FUNCTION
-        # corr = correlograms(spike_times,
-        #                     spike_clusters,
-        #                     soft_assignment,
-        #                     cluster_ids=np.arange(4),
-        #                     sample_rate=self.sample_rate,
-        #                     bin_size=self.bin_size,
-        #                     window_size=self.corr_window)
 
         #
         lag_range = self.window*self.sample_rate
@@ -2565,15 +2820,11 @@ class ProcessSession():
 
                 #
                 plt.ylim(bottom=0)
-                #plt.plot([0,0],
-                #         [0,np.max(cc) ],
-                #         '--',c='grey')
 
                 # plot a horizontal line at zero
                 plt.plot([t[0],t[-1]],
                             [0,0],
                             '--',c='grey')
-
 
         #
         plt.suptitle(self.animal_id + " " + self.session_id + " Raw fluorescence based xcorrelation")
@@ -2623,7 +2874,7 @@ class ProcessSession():
 
                 early = []
                 late = []
-                for session_id in tqdm(self.session_ids[1:], desc='loading data for hit rate per session'):
+                for session_id in self.session_ids[1:]:
 
                     #
                     cc = self.load_corrs_from_json_flurescence(session_id)
@@ -2961,6 +3212,12 @@ class ProcessSession():
         self.F_onphase_bin = c.F_onphase_bin
         self.F_filtered = c.F_filtered
 
+        # clip all to self.session_duration
+        self.F_upphase_bin = self.F_upphase_bin[:,:self.session_duration]
+        self.F_onphase_bin = self.F_onphase_bin[:,:self.session_duration]
+        self.F_filtered = self.F_filtered[:,:self.session_duration]
+
+        #
         np.save(fname_out,self.F_upphase_bin)
 
         ################################################
@@ -2969,12 +3226,13 @@ class ProcessSession():
         from scipy.optimize import curve_fit
         from scipy import asarray as ar, exp
         plt.figure(figsize=(15,10))
-        Ensembles = [
-            self.E1[0],
-            self.E1[1],
-            self.E2[0],
-            self.E2[1],
-                     ]
+        # Ensembles = [
+        #     self.E1[0],
+        #     self.E1[1],
+        #     self.E2[0],
+        #     self.E2[1],
+        #              ]
+        
         names = ["roi1", "roi2","roi3","roi4",]
         clrs=['blue','red']
         for k in range(4):
@@ -3005,14 +3263,7 @@ class ProcessSession():
 
         plt.savefig(os.path.join(self.save_dir, 'binarized_traces.png'), dpi=200)
 
-        #
-        # if self.show_plots:
-        #     plt.show()
-        # else:
-        #     plt.close()
-
-
-
+    #
     def n_rewards_intra_session(self):
         #
         labels = []
@@ -3077,14 +3328,19 @@ class ProcessSession():
         plt.legend()
         plt.suptitle(self.animal_id)
 
-        plt.savefig(os.path.join(self.save_dir,
+        plt.savefig(os.path.join(self.root_dir,
+                                self.animal_id,
+                                'results',
                                 'n_rewards_intra_session.png'), dpi=200)
         # if self.show_plots:
         #     plt.show()
         # else:
         plt.close()
 
-        np.save(os.path.join(self.save_dir,'n_rewards_intra_session.npy'),mean)
+        np.save(os.path.join(self.root_dir,
+                                self.animal_id,
+                                'results',
+                             'n_rewards_intra_session.npy'),mean)
 
 
     def n_rewards_intra_session_normalized(self):
@@ -3241,6 +3497,17 @@ class ProcessSession():
         #
         self.verbose=False
         self.window = 30   # in seconds
+#
+        self.early = [self.session_ids[1],
+                        self.session_ids[2],
+                        ]
+
+        #
+        self.late = [self.session_ids[-2],
+                        self.session_ids[-1],
+                    ]
+
+
         self.correlograms_inter_session_early_vs_late()
 
         #
@@ -3248,6 +3515,10 @@ class ProcessSession():
 
         #
         self.burst_durations_per_session()
+
+        #
+        self.n_rewards_intra_session()
+
 
     #
     def burst_durations_per_session(self):
