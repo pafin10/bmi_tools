@@ -1705,17 +1705,19 @@ class ProcessSession():
 
         #
         if self.verbose:
-            print("reward times: ", self.reward_times.shape)
-            print ("Recording length (mins): ", self.rec_len_mins)
-            print("abs times: ", self.abs_times.shape, self.abs_times)
-            print("ttl times: ", self.ttl_times.shape, self.ttl_times[0], self.ttl_times[-1], " total rec time sec: ",
-              self.ttl_times[-1] - self.ttl_times[0])
-            print("ttl computed: ", self.ttl_comp.shape, self.ttl_comp)
-            print("ttl detected: ", self.ttl_det.shape, self.ttl_det)
-            print("lick detector: ", self.lick_detector.shape)
-            print("lick times: ", self.lick_times)
-            print("E1 , E2, ", self.E1.shape, self.E2.shape)
-
+            try:
+                print("reward times: ", self.reward_times.shape)
+                print ("Recording length (mins): ", self.rec_len_mins)
+                print("abs times: ", self.abs_times.shape, self.abs_times)
+                print("ttl times: ", self.ttl_times.shape, self.ttl_times[0], self.ttl_times[-1], " total rec time sec: ",
+                self.ttl_times[-1] - self.ttl_times[0])
+                print("ttl computed: ", self.ttl_comp.shape, self.ttl_comp)
+                print("ttl detected: ", self.ttl_det.shape, self.ttl_det)
+                print("lick detector: ", self.lick_detector.shape)
+                print("lick times: ", self.lick_times)
+                print("E1 , E2, ", self.E1.shape, self.E2.shape)
+            except:
+                pass
     #
     def process_session_traces(self):
 
@@ -3080,7 +3082,10 @@ class ProcessSession():
         for session_id in tqdm(self.session_ids[1:], desc='loading data for hit rate per session'):
 
             #
-            cc_temp = self.load_corrs_upphase(session_id)
+            try:
+                cc_temp = self.load_corrs_upphase(session_id)
+            except:
+                continue
 
             # remake these as they are stored in linear fashion
             cc = []
@@ -3158,31 +3163,32 @@ class ProcessSession():
                                   self.session_id)
 
         # c.detrend_model_order = 1
-        c.save_python = True
-        c.save_matlab = False
-        c.sample_rate = 30
+        # c.save_python = True
+        # c.save_matlab = False
+        # c.sample_rate = 30
 
-        #
-        c.min_width_event_onphase = self.min_width_event_onphase
-        c.min_width_event_upphase = self.min_width_event_upphase
+        # #
+        # c.min_width_event_onphase = self.min_width_event_onphase
+        # c.min_width_event_upphase = self.min_width_event_upphase
 
-        ############# PARAMTERS TO TWEAK ##############
-        #     1. Cutoff for calling somthing a spike:
-        #        This is stored in: std_Fluorescence_onphase/uppohase: defaults: 1.5
-        #                                        higher -> less events; lower -> more events
-        #                                        start at default and increase if data is very noisy and getting too many noise-events
-        c.min_thresh_std_onphase = self.std_upphase               # set the minimum thrshold for onphase detection; defatul 2.5
-        c.min_thresh_std_upphase = self.std_upphase  # set the minimum thershold for uppohase detection; default: 2.5
+        # ############# PARAMTERS TO TWEAK ##############
+        # #     1. Cutoff for calling somthing a spike:
+        # #        This is stored in: std_Fluorescence_onphase/uppohase: defaults: 1.5
+        # #                                        higher -> less events; lower -> more events
+        # #                                        start at default and increase if data is very noisy and getting too many noise-events
+        # c.min_thresh_std_onphase = self.std_upphase               # set the minimum thrshold for onphase detection; defatul 2.5
+        # c.min_thresh_std_upphase = self.std_upphase  # set the minimum thershold for uppohase detection; default: 2.5
 
-        #     2. Filter of [Ca] data which smooths the data significantly more and decreases number of binarzied events within a multi-second [Ca] event
-        #        This is stored in high_cutoff: default 0.5 to 1.0
-        #        The lower we set it the smoother our [Ca] traces and less "choppy" the binarized traces (but we loose some temporal precision)
-        c.high_cutoff = 0.5
+        # #     2. Filter of [Ca] data which smooths the data significantly more and decreases number of binarzied events within a multi-second [Ca] event
+        # #        This is stored in high_cutoff: default 0.5 to 1.0
+        # #        The lower we set it the smoother our [Ca] traces and less "choppy" the binarized traces (but we loose some temporal precision)
+        # c.high_cutoff = 0.5
 
-        #     3. Removing bleaching and drift artifacts using polynomial fits
-        #        This is stored in detrend_model_order
+        # #     3. Removing bleaching and drift artifacts using polynomial fits
+        # #        This is stored in detrend_model_order
         c.detrend_model_order = 1  # 1-5 polynomial fit
         c.detrend_model_type = 'polynomial'  # 'polynomial' or 'exponential'
+        
 
         # remove first five seconds of data ni traces
         self.E1[0][:5 * self.sample_rate] = 0
@@ -3202,9 +3208,10 @@ class ProcessSession():
         c.verbose=False
         c.percentile_threshold = self.percentile_threshold
         c.recompute_binarization = self.recompute_binarization
+        c.save_python = self.save_python
+        c.save_matlab = self.save_matlab
 
-
-        #c.binarize_fluorescence2()
+        # 
         c.load_binarization()
 
 
@@ -3226,13 +3233,7 @@ class ProcessSession():
         from scipy.optimize import curve_fit
         from scipy import asarray as ar, exp
         plt.figure(figsize=(15,10))
-        # Ensembles = [
-        #     self.E1[0],
-        #     self.E1[1],
-        #     self.E2[0],
-        #     self.E2[1],
-        #              ]
-        
+
         names = ["roi1", "roi2","roi3","roi4",]
         clrs=['blue','red']
         for k in range(4):
@@ -3276,6 +3277,7 @@ class ProcessSession():
             
             S.session_id = session_id
             S.skip_dict = True
+            S.session_duration = self.session_duration
 
             #
             S.verbose=self.verbose
@@ -3436,7 +3438,7 @@ class ProcessSession():
                                       self.animal_id,
                                      session_id,
                                      'results',
-                                     'intra_session_reward_hits_per_minute.npy'))
+                                     'intra_session_reward_hits_per_minute_'+str(self.session_duration)+'.npy'))
 
             #
             hit_rates.append(hr)
@@ -3627,6 +3629,7 @@ class ProcessSession():
                 #
                 S.session_id = session_id
 
+                S.session_duration = self.session_duration
                 S.load_data()
 
                 #
@@ -3660,8 +3663,10 @@ class ProcessSession():
 
         plt.scatter(xx,yy, c='blue', label = "pcorr: "+str(round(res[0],2))+ ", pval: "+str(round(res[1],5)),
                     linewidth=5)
-
-        plt.xticks(np.arange(len(yy)), labels, rotation=30)
+        try:
+            plt.xticks(np.arange(len(yy)), labels, rotation=30)
+        except:
+            pass
         plt.xlim(xx[0]-0.5,xx[-1]+0.5)
         plt.bar(xx,yy,0.9, alpha=.5)
         plt.ylabel("# rewards")
@@ -3688,8 +3693,8 @@ class ProcessSession():
 
         #
         for session_id in tqdm(self.session_ids[1:],desc='loading data for n_bursts_per_session'):
-            S = ProcessSession(self.root_dir,
-                               self.animal_id)
+            #S = ProcessSession(self.root_dir,
+             #                  self.animal_id)
             #
             #S.load_data()
             load_dir = os.path.join(self.root_dir,
@@ -3777,12 +3782,22 @@ class ProcessSession():
             #print (cmap)
 
             #
+            traces2 = []
             for s in range(len(yys)):
                 xx = np.arange(len(yys[s])) * 5+2.5
 
                 plt.plot(xx, yys[s], color=colors[s],
                          label=labels[s]
                          )
+                traces2.append(yys[s])
+            
+            #
+            traces2 = np.vstack(traces2)
+            mean = np.mean(traces2,0)
+            std = np.std(traces2,0)
+            plt.plot(xx,mean, c='red', label="mean")
+
+            plt.fill_between(xx, mean + std, mean - std, color='black', alpha=0.1)
 
             #red_patch = mpatches.Patch(color='none', label=names[k])
             #plt.legend(handles=[red_patch])

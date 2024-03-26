@@ -91,6 +91,18 @@ class ProcessCalcium():
         #
         self.clrs=['blue','lightblue','red','pink']
 
+        # load session types by looping over all session
+        self.session_types = []
+        for session_id in self.session_ids:
+            # load the yaml file in that directory
+            fname_yaml = os.path.join(self.root_dir,
+                                    self.animal_id,
+                                    str(session_id),
+                                    str(session_id)+'.yaml')
+            with open(fname_yaml) as file:
+                doc = yaml.load(file, Loader=yaml.FullLoader)
+                self.session_types.append(doc['session_type'])
+
     def save_animal(self):
         #
         import dill
@@ -926,11 +938,6 @@ class ProcessCalcium():
         #
         plt.show()
         
-
-
-
-        #
-
     #
     def plot_reward_centered_traces(self):
         
@@ -1338,7 +1345,6 @@ class ProcessCalcium():
 
         plt.show()
 
-
     #
     def get_tone_triggered_ca_single_cell(self):
 
@@ -1605,7 +1611,6 @@ class ProcessCalcium():
         if self.plotting:   
             plt.show()
 
-
     #
     def compute_mean_warped_trace_positive(self):
 
@@ -1799,8 +1804,6 @@ class ProcessCalcium():
         
         #
        # plt.show()
-#
-
 
     #
     def get_ca_triggered_tone_all_cells(self):
@@ -4217,11 +4220,14 @@ class ProcessCalcium():
         data_dir = os.path.join(
                         self.root_dir,
                         self.animal_id,
-                        self.session_ids[self.session_id],
+                        str(self.session_ids[self.session_id]),
                         'plane0'
                         )
 
-        C = binca()       
+        C = binca.Binarize(self.root_dir,
+                           self.animal_id,
+                           str(self.session_id)
+                           )
         C.data_dir = data_dir
 
         #
@@ -4250,7 +4256,10 @@ class ProcessCalcium():
         #
         for session_id in session_ids:
             # load the suite2p ROIS as F_filtered
-            F_filtered = self.sessions[session_id].F_detrended
+            try:
+                F_filtered = self.sessions[session_id].F_detrended
+            except:
+                F_filtered = self.F_detrended
 
             # 
             # load the BMI live ROIS from the results.npz file
@@ -4525,7 +4534,11 @@ class ProcessCalcium():
                 return
 
             #
-            C = binca.Binarize()       
+            C = binca.Binarize(root_dir = self.root_dir,
+                               animal_id = self.animal_id,
+                               session_name = str(session_),
+                                    )
+            
             C.data_dir = data_dir
             C.data_type = '2p'
             C.set_default_parameters_2p()
@@ -4652,9 +4665,7 @@ class ProcessCalcium():
         plt.suptitle(self.animal_id)
         plt.show()
 
-
-
-
+#
 def get_reward_centered_traces(session_id,
                                 root_dir,
                                 animal_id,

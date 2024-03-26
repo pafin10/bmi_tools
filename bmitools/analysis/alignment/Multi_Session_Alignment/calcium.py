@@ -970,6 +970,7 @@ class Calcium():
                 self.F = data["F_raw"]
                 self.F_onphase_bin = data['F_onphase']
                 self.F_upphase_bin = data['F_upphase']
+                self.F_detrended = data['F_detrended']
                 self.spks = data['spks']
                 self.spks_smooth_bin = data['spks_smooth_upphase']
                 self.detrend_model_order = data['detrend_model_order']
