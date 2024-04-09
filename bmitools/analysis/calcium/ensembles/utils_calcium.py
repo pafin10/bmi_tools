@@ -20,6 +20,7 @@ from scipy.signal import butter, sosfilt
 from scipy import stats
 import pickle
 import dill
+import networkx as nx
 
 #
 import binarize2pcalcium.binarize2pcalcium as binca
@@ -4251,15 +4252,26 @@ class ProcessCalcium():
     def compute_bmi_to_suite2p_matches(self):
 
         # load the ROIs from the session and match them to the ROIS from suite2p loaded data
-        session_ids = np.arange(1,len(self.session_types),1)
-
+        session_ids = np.arange(0,len(self.session_types),1)
+        print ("session_ids: ", session_ids)
         #
         for session_id in session_ids:
+
+            fname_results = os.path.join(self.root_dir,
+                                            self.animal_id,
+                                            str(self.session_ids[session_id]),
+                                            'plane0',
+                                            'binarized_traces.npz')       
+       
+            # load the results file
+            d = np.load(fname_results, allow_pickle=True)
+
+
             # load the suite2p ROIS as F_filtered
             try:
-                F_filtered = self.sessions[session_id].F_detrended
+                F_filtered = d['F_detrended']
             except:
-                F_filtered = self.F_detrended
+                F_filtered = d['F_filtered']
 
             # 
             # load the BMI live ROIS from the results.npz file
@@ -4268,11 +4280,99 @@ class ProcessCalcium():
                                         self.animal_id,
                                         str(self.session_ids[session_id]),
                                         'rois_pixels_and_thresholds_day0.npz')
-                d = np.load(fname_rois, allow_pickle=True)
+                try:
+                    d = np.load(fname_rois, allow_pickle=True)
+                except:
+                    print ("missing ", 'rois_pixels_and_thresholds_day0.npz')
+                    continue
                 cell_ids = d['cell_ids']
 
-                # grab the [ca] data from the suite2p data
-                # TODO
+                # save the best match ids 
+                dir_ensembles = os.path.join(self.root_dir,
+                                            self.animal_id,
+                                            str(self.session_ids[session_id]),
+                                            'ensembles')
+                
+                if os.path.exists(dir_ensembles)==False:
+                    os.mkdir(dir_ensembles)
+
+                fname_match = os.path.join(dir_ensembles, 
+                                        'ensembles_matches_bmi_to_suite2p.npz')
+                
+                if os.path.exists(fname_match)==True:
+                    print (".... already computed...")
+                    continue
+                
+                # there is no need to search because the ROIs are already matched
+                corrs = cell_ids
+                rois = F_filtered[cell_ids]
+
+
+                #
+                np.savez(fname_match,
+                        idx_text = "These are the cells in the suite2p data that match the BMI live ROIs.",
+                        idx_ensemble1_0 = corrs[0],
+                        idx_ensemble1_1 = corrs[1],
+                        idx_ensemble2_0 = corrs[2],
+                        idx_ensemble2_1 = corrs[3],
+                        
+                        # save the raw 
+                        ensemble_bmi_text = "These are the raw ROIs from the BMI live data.",
+                        ensemble1_0_bmi = rois[0],
+                        ensemble1_1_bmi = rois[1],
+                        ensemble2_0_bmi = rois[2],
+                        ensemble2_1_bmi = rois[3],
+
+                        # save the matching suite2p data
+                        ensemble_suite2p_text = "These are the matching ROIs from the suite2p data.",
+                        ensemble1_0_suite2p = F_filtered[corrs[0]],
+                        ensemble1_1_suite2p = F_filtered[corrs[1]],
+                        ensemble2_0_suite2p = F_filtered[corrs[2]],
+                        ensemble2_1_suite2p = F_filtered[corrs[3]],
+                        )
+                
+                # autosave the matches to disk also
+                for k in range(4):
+                    from matplotlib.figure import Figure
+                    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvasAgg
+
+                    # Create a figure
+                    fig = plt.figure(figsize=(16,4))
+
+                    # Associate the figure with the 'Agg' backend by creating a FigureCanvasAgg instance
+                    #canvas = FigureCanvasAgg(fig)
+
+                    # Now you can add axes, plot data, and set labels and titles as usual
+                    ax = plt.subplot(111)  # Add an axes to the figure
+                    temp = rois[k]
+                    f0 = np.median(temp)
+                    temp = (temp-f0)/f0
+
+                    # filter temp using box filter
+                    # Define the box filter kernel (window)
+                    window_size = 151  # Size of the box filter window
+                    box_filter = np.ones(window_size) / window_size
+
+                    # Apply the box filter using numpy's convolution function
+                    temp = np.convolve(temp, box_filter, mode='same')
+                    ax.plot(temp, label='ensemble roi: '+str(k),
+                             alpha=.8)
+
+                    temp = np.convolve(F_filtered[corrs[k]], box_filter, mode='same')
+                    temp = (temp-f0)/f0
+                    ax.plot(temp, 
+                            label='matching suite2p cell: '+str(corrs[k]),
+                            alpha=.8,
+                            linewidth=1)
+                    
+                    #
+                    ax.set_xlabel("Frames")
+                    ax.legend()
+                    plt.savefig(fname_match[:-4]+str(k)+'.png', dpi=300)
+                    
+                    #
+                    plt.close()
+
 
             # we load 
             else:
@@ -4300,11 +4400,14 @@ class ProcessCalcium():
                 
                 if os.path.exists(fname_match)==True:
                     print (".... already computed...")
-                    return
+                    continue
 
-                
                 # load the results file
-                d = np.load(fname_results, allow_pickle=True)
+                try:
+                    d = np.load(fname_results, allow_pickle=True)
+                except:
+                    print (".npz corrupt")
+                    continue
 
                 #
                 rois1 = d['rois_traces_raw_ensemble1']
@@ -4317,11 +4420,12 @@ class ProcessCalcium():
                 corr1 = np.zeros((2,F_filtered.shape[0]))
                 corr2 = np.zeros((2,F_filtered.shape[0]))
 
+                # these are the traces
+                rois = [rois1[0], rois1[1], rois2[0], rois2[1]]
 
-                
                 #
                 corrs = parmap.map(compute_corr2, 
-                                    [rois1[0], rois1[1], rois2[0], rois2[1]], 
+                                    rois, 
                                     F_filtered, 
                                     pm_processes=4, 
                                     pm_pbar=True)
@@ -4329,10 +4433,6 @@ class ProcessCalcium():
                 ##########################################################
                 ##########################################################
                 ##########################################################
-
-
-                
-                rois = [rois1[0], rois1[1], rois2[0], rois2[1]]
 
                 #
                 np.savez(fname_match,
@@ -4413,13 +4513,15 @@ class ProcessCalcium():
         for session_id in np.arange(1,len(self.session_ids),1):
 
             #
-            psths_avg, psths_shuffled_avg, n_bursts  = get_reward_triggered_bmi_ensembles(session_id, 
-                                                                                        self,
-                                                                                        self.window)
+            try:
+                psths_avg, psths_shuffled_avg, n_bursts  = get_reward_triggered_bmi_ensembles(session_id, 
+                
+                                                                                          self,
+                                                                                          self.window)
+            except:
+                continue
             
-            # print ("psths_avg: ", psths_avg.shape)
-            # print ("psths_shuffled_avg: ", psths_shuffled_avg.shape)
-
+            # 
             for k in range(4):
                 ax = plt.subplot(2,2,k+1)
 
@@ -4458,7 +4560,6 @@ class ProcessCalcium():
 
         #  
         plt.suptitle(self.animal_id+ " " + str(self.rec_type))
-
 
         # 
         plt.show()
@@ -6441,7 +6542,7 @@ def run_pearson_corr_single_cell_vs_all_cells_parallel(idxs,
         binning_window = 30
         n_cores = 16
 
-        # not used for now, but may wish to skip computation if file already exists
+        # skip computation if file already exists
         if os.path.exists(fname_out): # and recompute_correlation==False:
             return
 
@@ -6520,7 +6621,18 @@ def run_pearson_corr_single_cell_vs_all_cells_parallel(idxs,
 def compute_ensemble_only_correlations(c):  
 
     #
-    for session_id in trange(1,len(c.session_ids), desc='computing ensemble only correlations'):
+    for session_id in trange(0,len(c.session_ids), desc='computing ensemble only correlations'):
+
+
+        #
+        fname_suite2p = os.path.join(c.root_dir,
+                                    c.animal_id,
+                                    str(c.session_ids[session_id]),
+                                    'plane0',
+                                    'binarized_traces.npz')
+        d = np.load(fname_suite2p, allow_pickle=True)
+        F_upphase = d['F_upphase']
+        F_detrended = d['F_detrended']
 
         #
         fname_ensemble_matching = os.path.join(c.root_dir, 
@@ -6528,9 +6640,23 @@ def compute_ensemble_only_correlations(c):
                                             str(c.session_ids[session_id]), 
                                             'ensembles',
                                             'ensembles_matches_bmi_to_suite2p.npz')
+        
+        # check of directory exists first
+        if os.path.exists(os.path.join(c.root_dir,
+                                    c.animal_id,
+                                    str(c.session_ids[session_id]),
+                                    'correlations'))==False:
+            os.mkdir(os.path.join(c.root_dir,
+                                    c.animal_id,
+                                    str(c.session_ids[session_id]),
+                                    'correlations'))
 
-        #        
-        data = np.load(fname_ensemble_matching, allow_pickle=True)
+        #
+        try:
+            data = np.load(fname_ensemble_matching, allow_pickle=True)
+        except:
+            print ("missing file: ", fname_ensemble_matching)
+            continue
 
         #
         idxs = []
@@ -6555,9 +6681,471 @@ def compute_ensemble_only_correlations(c):
         run_pearson_corr_single_cell_vs_all_cells_parallel(
                                                         idxs, 
                                                         dir_corrs,
-                                                        c.sessions[session_id].F_upphase_bin.copy(),
-                                                        c.sessions[session_id].F_detrended.copy(), 
+                                                        #c.sessions[session_id].F_upphase_bin.copy(),
+                                                        F_upphase.copy(),
+                                                        #c.sessions[session_id].F_detrended.copy(), 
+                                                        F_detrended.copy(),
                                                         n_tests=1000, 
                                                         min_number_bursts=0
                                                         )
+
+#
+def make_ensemble_graphs(c, show_plots=False):
+    cmap = matplotlib.cm.get_cmap('viridis')
+    colors = cmap(np.linspace(0.1, 0.9, len(c.session_ids)))
+    clrs = ['blue','lightblue','red','pink']
+    roi_names = ['pos1','pos2','neg1','neg2']
+
+    #
+    corr_thresh = 0.1
+    corr_thresh_zscore = 5
+    use_raw_pcorr = False
+
+    #
+    plt.figure(figsize=(20,10))
+    for session_id in range(0,len(c.session_ids)):
+        fname_ensemble_matching = os.path.join(c.root_dir, 
+                                            c.animal_id, 
+                                            str(c.session_ids[session_id]), 
+                                            'ensembles',
+                                            'ensembles_matches_bmi_to_suite2p.npz')
+        
+        #print ("fname_ensemble_matching: ", fname_ensemble_matching)
+        try:
+            data = np.load(fname_ensemble_matching, allow_pickle=True)
+        except:
+            print ("missing: ", fname_ensemble_matching)
+            continue
+        #
+        idxs = []
+        idxs.append(data['idx_ensemble1_0'])
+        idxs.append(data['idx_ensemble1_1'])
+        idxs.append(data['idx_ensemble2_0'])
+        idxs.append(data['idx_ensemble2_1'])
+        idxs = np.array(idxs)
+    # print ("idxs: ", idxs)
+
+        # load the cell correlation vals 
+        dir_corrs = os.path.join(c.root_dir,
+                                    c.animal_id,
+                                    str(c.session_ids[session_id]),
+                                    'plane0',
+                                    'correlations')
+        
+        # load the cell correlation vals using idxs as the ensemble
+        fname_corr = os.path.join(dir_corrs, str(idxs[0])+'.npz')
+        data = np.load(fname_corr, allow_pickle=True)
+        pc = data['pearson_corr']
+        n_cells = pc.shape[0]
+        m = np.zeros((n_cells,n_cells), dtype=np.int32)
+
+        #
+        ctr=0
+        for idx in idxs:
+            fname_corr = os.path.join(dir_corrs, str(idx)+'.npz')
+            try:
+                data = np.load(fname_corr, allow_pickle=True)
+            except:
+                print ("missing cell: ", idx)
+                continue
+            #
+            pc = data['pearson_corr']
+            pc_zscore = data['z_score_pearson_corr']
+
+            # find correlations > corr_thresh
+            if use_raw_pcorr:
+                idx_thresh = np.where(pc>corr_thresh)[0]
+            else:
+                idx_thresh = np.where(pc_zscore>corr_thresh_zscore)[0]
+
+            # 
+            #print ("idx: ", idx, "idx_thresh: ", idx_thresh.shape)
+            for id2 in idx_thresh:
+                m[idx, id2]=1
+                m[id2, idx]=1
+
+            ctr+=1          
+
+        #
+        ctr3 = 2
+        for idx in idxs:
+            m[idx,idx]= ctr3
+            ctr3+=1
+
+        #
+        G = nx.Graph(m)
+
+        # remove isolates
+        G.remove_nodes_from(list(nx.isolates(G)))
+
+        nodes_list = list(G.nodes)
+        #print ("nodes_list: ", len(nodes_list))
+        #print ("important nodes: ", idxs)
+
+        # make a color list all black except the important nodes
+        node_colors = []
+        ctr=0
+        for k in range(len(nodes_list)):
+            #print ('nodes_list[k]', nodes_list[k])
+            if nodes_list[k] in idxs:
+                # find match:
+                idx = np.where(nodes_list[k]==idxs)[0]
+                #print ("idx: ", idx)
+                node_colors.append(clrs[idx[0]])
+                ctr+=1
+            else:
+                node_colors.append('black')
+
+
+        ##############################################################
+        ##############################################################
+        ##############################################################
+        ax=plt.subplot(2,5,session_id+1)
+
+        # remove self loops
+        G.remove_edges_from(nx.selfloop_edges(G))
+
+        #
+        pos = nx.spring_layout(G)
+        
+        # if want to fix positions
+        # fixed_positions = {1: (0, 0), 3: (1, 1)}
+        # pos.update(fixed_positions)
+
+        nx.draw(G, 
+                pos,
+                with_labels=False, 
+                node_size=20,
+                node_color=node_colors
+                #font_weight='bold'
+                )
+        
+        # save the graph image
+        fname_out_png = os.path.join(c.root_dir, 
+                                    c.animal_id, 
+                                    str(c.session_ids[session_id]), 
+                                    'ensembles',
+                                    'ensemble_graph.png')
+
+        # save the graph metadata to reconstruct the graph later
+        fname_out = os.path.join(c.root_dir, 
+                                    c.animal_id, 
+                                    str(c.session_ids[session_id]), 
+                                    'ensembles',
+                                    'ensemble_graph.npz')
+        np.savez(fname_out,
+                nodes_list=nodes_list,
+                node_colors=node_colors,
+                m=m,
+                idxs=idxs,
+                pos=pos
+                )
+
+
+        # add ylabel on the plot
+        ax.set_ylabel(str(session_id), labelpad=20)
+
+        #
+        ctr+=1
+        axis = plt.gca()
+        plt.box(True)
+
+        # draw a border around the figure
+        ax.set_title(str(c.session_types[session_id]), fontsize=20)
+
+        plt.savefig(fname_out_png, dpi=300)
+
+    #
+    plt.suptitle(c.animal_id+" "+str(c.rec_type))
+
+    #
+    plt.show()
+
+    if show_plots==False:
+        plt.close()
+
+
+# make viridis colormap of len(c.session_ids)
+def make_ensemble_graphs_statistics(c, show_plots=False):
+    cmap = matplotlib.cm.get_cmap('viridis')
+    colors = cmap(np.linspace(0.1, 0.9, len(c.session_ids)))
+    clrs = ['blue','lightblue','red','pink']
+
+    roi_names = ['pos1','pos2','neg1','neg2']
+
+    #
+    corr_thresh = 0.1
+    corr_thresh_zscore = 5
+    use_raw_pcorr = False
+
+    #
+    ensembles_n_corrs = []
+    for session_id in range(0,len(c.session_ids)):
+        fname_ensemble_matching = os.path.join(c.root_dir, 
+                                            c.animal_id, 
+                                            str(c.session_ids[session_id]), 
+                                            'ensembles',
+                                            'ensembles_matches_bmi_to_suite2p.npz')
+        
+        #print ("fname_ensemble_matching: ", fname_ensemble_matching)
+        try:
+            data = np.load(fname_ensemble_matching, allow_pickle=True)
+        except:
+            continue
+        #
+        idxs = []
+        idxs.append(data['idx_ensemble1_0'])
+        idxs.append(data['idx_ensemble1_1'])
+        idxs.append(data['idx_ensemble2_0'])
+        idxs.append(data['idx_ensemble2_1'])
+        idxs = np.array(idxs)
+        print ("idxs: ", idxs)
+
+        # load the cell correlation vals 
+        dir_corrs = os.path.join(c.root_dir,
+                                    c.animal_id,
+                                    str(c.session_ids[session_id]),
+                                    'plane0',
+                                    'correlations')
+        
+        # load the cell correlation vals using idxs as the ensemble
+        # this is just to initialize the correlation matrix
+        fname_corr = os.path.join(dir_corrs, 
+                                str(idxs[0])+'.npz')
+        data = np.load(fname_corr, allow_pickle=True)
+        pc = data['pearson_corr']
+        n_cells = pc.shape[0]
+        m = np.zeros((n_cells,n_cells), dtype=np.int32)
+
+        #
+        ctr=0
+        idx_n_corrs = []
+        for idx in idxs:
+            fname_corr = os.path.join(dir_corrs, 
+                                    str(idx)+'.npz')
+            try:
+                data = np.load(fname_corr, allow_pickle=True)
+            except:
+                print ("missing cell: ", idx)
+                continue
+            #
+            pc = data['pearson_corr']
+            pc_zscore = data['z_score_pearson_corr']
+
+            # find correlations > corr_thresh
+            if use_raw_pcorr:
+                idx_thresh = np.where(pc>corr_thresh)[0]
+            else:
+                idx_thresh = np.where(pc_zscore>corr_thresh_zscore)[0]
+
+            # just count the number of correlated cells
+            idx_n_corrs.append(len(idx_thresh))
+
+            ctr+=1          
+
+        # 
+        ensembles_n_corrs.append(idx_n_corrs)
+
+
+    #######################################################
+    #######################################################
+    #######################################################
+        
+    print ("ensembles_n_corrs: ", ensembles_n_corrs)
+    ensembles_n_corrs = np.array(ensembles_n_corrs)
+    print ("ensembles_n_corrs: ", ensembles_n_corrs.shape)
+    #
+    plt.figure()
+    for k in range(4):
+        plt.plot(ensembles_n_corrs[:,k], 
+                color=clrs[k],
+                label=str(roi_names[k]))
+        
+    plt.legend()
+    plt.suptitle(c.animal_id+" "+str(c.rec_type))
+
+    # save figure
+    fname_out = os.path.join(c.root_dir,
+                            c.animal_id,
+                            'ensembles',
+                            'ensembles_n_corrs.png')
+    # make sure the directory exists
+    if not os.path.exists(os.path.dirname(fname_out)):
+        os.makedirs(os.path.dirname(fname_out))
+    #
+    plt.savefig(fname_out, dpi=300)
+
+    # also save the data
+    fname_out = os.path.join(c.root_dir,
+                            c.animal_id,
+                            'ensembles',
+                            'ensembles_n_corrs.npy')
+
+    #
+    np.save(fname_out, ensembles_n_corrs)
+
+    #
+    plt.show()
+    if show_plots==False:
+        plt.close()
+        
+
+def make_ensemble_graphs_statistics_allcells(c, plotflag=False):
+    #
+    cmap = matplotlib.cm.get_cmap('viridis')
+    colors = cmap(np.linspace(0.1, 0.9, len(c.session_ids)))
+    clrs = ['blue','lightblue','red','pink']
+
+    roi_names = ['pos1','pos2','neg1','neg2']
+
+    #
+    corr_thresh = 0.1
+    corr_thresh_zscore = 5
+    use_raw_pcorr = False
+
+    #
+    ensembles_n_corrs = []
+    allrois_n_corrs = []
+    for session_id in range(0,len(c.session_ids)):
+        fname_ensemble_matching = os.path.join(c.root_dir, 
+                                            c.animal_id, 
+                                            str(c.session_ids[session_id]), 
+                                            'ensembles',
+                                            'ensembles_matches_bmi_to_suite2p.npz')
+        
+        #print ("fname_ensemble_matching: ", fname_ensemble_matching)
+        try:
+            data = np.load(fname_ensemble_matching, allow_pickle=True)
+        except:
+            continue
+        #
+        idxs = []
+        idxs.append(data['idx_ensemble1_0'])
+        idxs.append(data['idx_ensemble1_1'])
+        idxs.append(data['idx_ensemble2_0'])
+        idxs.append(data['idx_ensemble2_1'])
+        idxs = np.array(idxs)
+        print ("idxs: ", idxs)
+
+        # load the cell correlation vals 
+        dir_corrs = os.path.join(c.root_dir,
+                                    c.animal_id,
+                                    str(c.session_ids[session_id]),
+                                    'plane0',
+                                    'correlations')
+        
+        # load the cell correlation vals using idxs as the ensemble
+        # this is just to initialize the correlation matrix
+        fname_corr = os.path.join(dir_corrs, 
+                                str(idxs[0])+'.npz')
+        data = np.load(fname_corr, allow_pickle=True)
+        pc = data['pearson_corr']
+        n_cells = pc.shape[0]
+        #m = np.zeros((n_cells,n_cells), dtype=np.int32)
+
+        #
+        ctr=0
+        idx_n_corrs = [[],[],[],[]]
+        allrois = []
+        for k in range(n_cells):
+
+            #
+            fname_corr = os.path.join(dir_corrs, 
+                                    str(k)+'.npz')
+            try:
+                data = np.load(fname_corr, allow_pickle=True)
+            except:
+                print ("missing cell: ", idx)
+                continue
+            #
+            pc = data['pearson_corr']
+            pc_zscore = data['z_score_pearson_corr']
+
+            # find correlations > corr_thresh
+            if use_raw_pcorr:
+                idx_thresh = np.where(pc>corr_thresh)[0]
+            else:
+                idx_thresh = np.where(pc_zscore>corr_thresh_zscore)[0]
+
+            temp_degree = len(idx_thresh)/n_cells
+            # find if k matches idxs
+            for p in range(4):
+                idx = idxs[p]
+                if k == idx:
+                    idx_n_corrs[p].append(temp_degree)
+                    continue        
             
+            # 
+            allrois.append(temp_degree)
+
+            ctr+=1          
+
+        # 
+        ensembles_n_corrs.append(idx_n_corrs)
+        allrois_n_corrs.append(allrois)
+
+    #######################################################
+    #######################################################
+    #######################################################
+        
+    #print ("ensembles_n_corrs: ", ensembles_n_corrs)
+    ensembles_n_corrs = np.array(ensembles_n_corrs)
+    #print ("ensembles_n_corrs: ", ensembles_n_corrs.shape)
+    #
+    plt.figure()
+    for k in range(4):
+        plt.plot(ensembles_n_corrs[:,k], 
+                color=clrs[k],
+                label=str(roi_names[k]))
+        
+    plt.legend()
+    plt.suptitle(c.animal_id+" "+str(c.rec_type))
+
+
+    # also plot the average number of correlated cells for all cells outside the ROIs
+    temp_allrois = []
+    temp_allrois_stds = []
+    temp_allrois_sems = []
+    for k in range(len(allrois_n_corrs)):
+        temp_allrois.append(np.median(allrois_n_corrs[k]))
+        temp_allrois_stds.append(np.std(allrois_n_corrs[k]))
+        temp_allrois_sems.append(np.std(allrois_n_corrs[k])/np.sqrt(len(allrois_n_corrs[k])))
+
+    means = np.array(temp_allrois)
+    sems = np.array(temp_allrois_sems)
+    plt.plot(means, color='black')
+    plt.fill_between(np.arange(means.shape[0]), 
+                    means-sems, 
+                    means+sems,
+                    color='black',
+                    alpha=.2)
+
+    # also plot every single value 
+
+
+
+    # save figure
+    fname_out = os.path.join(c.root_dir,
+                            c.animal_id,
+                            'ensembles',
+                            'ensembles_n_corrs_all_cells.png')
+    # make sure the directory exists
+    if not os.path.exists(os.path.dirname(fname_out)):
+        os.makedirs(os.path.dirname(fname_out))
+    #
+    plt.savefig(fname_out, dpi=300)
+
+    # also save the data
+    fname_out = os.path.join(c.root_dir,
+                            c.animal_id,
+                            'ensembles',
+                            'ensembles_n_corrs_all_cells.npz')
+
+    #
+    np.savez(fname_out,
+            means = means,
+            sems = sems,
+            ensembles_n_corrs = ensembles_n_corrs)
+    
+    #
+    plt.show()
