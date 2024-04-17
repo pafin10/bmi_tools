@@ -7085,22 +7085,9 @@ def make_ensemble_graphs_statistics_allcells(c, plotflag=False):
         allrois_n_corrs.append(allrois)
 
     #######################################################
+    ##################### PLOTTING ########################
     #######################################################
-    #######################################################
-        
-    #print ("ensembles_n_corrs: ", ensembles_n_corrs)
-    ensembles_n_corrs = np.array(ensembles_n_corrs)
-    #print ("ensembles_n_corrs: ", ensembles_n_corrs.shape)
-    #
-    plt.figure()
-    for k in range(4):
-        plt.plot(ensembles_n_corrs[:,k], 
-                color=clrs[k],
-                label=str(roi_names[k]))
-        
-    plt.legend()
-    plt.suptitle(c.animal_id+" "+str(c.rec_type))
-
+    
 
     # also plot the average number of correlated cells for all cells outside the ROIs
     temp_allrois = []
@@ -7119,6 +7106,42 @@ def make_ensemble_graphs_statistics_allcells(c, plotflag=False):
                     means+sems,
                     color='black',
                     alpha=.2)
+
+
+    #print ("ensembles_n_corrs: ", ensembles_n_corrs)
+    ensembles_n_corrs = np.array(ensembles_n_corrs)
+    #print ("ensembles_n_corrs: ", ensembles_n_corrs.shape)
+    #
+    plt.figure()
+    for k in range(4):
+        
+        # also compute pcorrelation on the ensemble_n_corrs[:,k]
+        from scipy.stats import pearsonr
+        x = np.arange(ensembles_n_corrs[:,k].shape[0],dtype=np.float32)
+        y = np.float32(ensembles_n_corrs[:,k]).squeeze()
+        
+        # remove the first values in the x and y
+        x = x[1:]
+        y = y[1:]
+
+        # divice by the means
+        y = y/means[1:]
+
+        # fit a line also to the data
+        m, b = np.polyfit(x, y, 1)  # Fit a first-degree polynomial (line) to the data
+        #
+        plt.plot(x, m*x + b, '--', color=clrs[k])
+        corr = pearsonr(x,y)
+
+        plt.plot(x, 
+                 y,
+                 color=clrs[k],
+                 label=str(roi_names[k]) + " pval: " + str(corr[1]) + ", corr: " + str(corr[0]))
+
+        
+    plt.legend()
+    plt.suptitle(c.animal_id+" "+str(c.rec_type))
+
 
     # also plot every single value 
 
