@@ -4526,7 +4526,10 @@ class ProcessCalcium():
                 return
 
             #
-            C = binca.Binarize()       
+            C = binca.Binarize(root_dir=self.root_dir,
+                               animal_id = self.animal_id,
+                               session_name = str(session_))
+            #C.root_dir =      
             C.data_dir = data_dir
             C.data_type = '2p'
             C.set_default_parameters_2p()
@@ -6201,7 +6204,7 @@ def process_populations(c, plotting=False):
                                         n_bursts_array,
                                         vmax=vmax)
 
-
+#
 def generate_learning_profiles(root_dir, 
                                animal_ids,
                                group_name, 
@@ -6212,7 +6215,7 @@ def generate_learning_profiles(root_dir,
                                normalize):
 
     #
-    plt.figure()
+    fig = plt.figure(figsize=(10,10))
     pops = [[],[],[]]
     for animal_id in tqdm(animal_ids):
 
@@ -6227,7 +6230,7 @@ def generate_learning_profiles(root_dir,
             continue
 
         #
-        plt.subplot(1,3,idx+1)
+        plt.subplot(1,1,1)
 
         #       
         c = ProcessCalcium(root_dir,
@@ -6252,7 +6255,20 @@ def generate_learning_profiles(root_dir,
             
             if os.path.exists(fname_out)==False:
                 n_cells.append(np.nan)
+                print ("skipping: ", fname_out)
                 continue
+
+            # skip 12502 mouse day 0, it's not processed correctly
+            if animal_id in ['DON-012502'] and session_id==1:
+                n_cells.append(np.nan)
+                continue
+ #
+            d = np.load(fname_out, allow_pickle=True)
+            psths = d['psths']
+            #print ("psths: ", psths)
+
+            # check how many pshs have a peak > thrsh
+            psth_mean = np.nanmean(psths, axis=1)
 
             # get # of cells by looking into the binarized file
             fname_binarized = os.path.join(c.root_dir,
@@ -6260,24 +6276,17 @@ def generate_learning_profiles(root_dir,
                                             str(c.session_ids[session_id]),
                                             'plane0',
                                             'binarized_traces.npz')
+            
+            #
             d = np.load(fname_binarized, mmap_mode='r', allow_pickle=True)
             F_upphase = d['F_upphase']
             total_cells = F_upphase.shape[0]
 
             #
-            d = np.load(fname_out, allow_pickle=True)
-            psths = d['psths']
-            psths_shuffled = d['psths_shuffled']
-            n_bursts = d['n_bursts']
-
-            # check how many pshs have a peak > thrsh
-            psth_mean = np.mean(psths, axis=1)
-
-            #
             try:
                 temp = np.where(psth_mean.max(1)>thresh)[0]
             except:
-                print (fname_out)
+                print ("issue with: ", fname_out)
                 #
 
             if norm_percentage:
@@ -6290,18 +6299,17 @@ def generate_learning_profiles(root_dir,
             n_cells = np.array(n_cells)/np.max(n_cells)
         else:
             n_cells = np.array(n_cells)
-
         
         #
+        engagement = n_cells[-1]/n_cells[0]
+
+        #print ("n_cells: ", n_cells)
         if n_cells.shape[0]<8:
             n_cells = np.concatenate((n_cells, np.zeros(8-n_cells.shape[0])+np.nan))
         
         #
-        engagement = n_cells[3]/n_cells[0]
-
-        #
         plt.plot(n_cells,
-                linewidth = 4, 
+                linewidth = 10, 
                 label=animal_id + " " + str(np.round(engagement*100,2)) + "%")
         #
         pops[idx].append(n_cells)
@@ -6311,19 +6319,28 @@ def generate_learning_profiles(root_dir,
 
     # now compute average pops and std also
     for k in range(len(pops)):
-        ax = plt.subplot(1,3,k+1)
+        #ax = plt.subplot(1,3,k+1)
+        ax = plt.subplot(1,1,1)
         temp = np.array(pops[k])
         mean = np.nanmean(temp, axis=0)
         std = np.nanstd(temp, axis=0)
         try:
-            plt.plot(mean, c='black')
-            plt.fill_between(np.arange(mean.shape[0]), mean-std, mean+std, alpha=.2, color='black')
+            plt.plot(mean, c='black', linewidth=4)
+            plt.fill_between(np.arange(mean.shape[0]), 
+                             mean-std, 
+                             mean+std, alpha=.2, color='black')
             plt.ylabel("% of cells with reward triggered response")
             plt.xlabel("Sessions")
         except:
             pass
+    
+    #
+    plt.ylim(0,70)
+    plt.xlim(left=0)
 
-    plt.show()
+
+    plt.savefig(os.path.join(root_dir, 'learning_profiles_'+group_name+'.svg'))
+    plt.close()
 
 
 

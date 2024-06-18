@@ -67,7 +67,8 @@ class ProcessCohort():
                 d = np.load(os.path.join(self.root_dir,
                                             animal_id,
                                             session_id,
-                                            'results/intra_session_reward_hits_per_minute.npy'))
+                                            'results/intra_session_reward_hits_per_minute_54000.npy'))
+                #print ("d: ", d)
                 hit_array.append(np.nanmean(d))
             
             #
@@ -75,6 +76,9 @@ class ProcessCohort():
 
             #
             hit_rates.append(hit_array)
+
+            #
+            #print ("hit array: ", hit_array)
 
 
         # plot each line from hit_rates
@@ -151,7 +155,7 @@ class ProcessCohort():
 
         # same for ave_ca3
         ave_ca3 = np.vstack(ave_ca3)
-        mean = np.nanmean(ave_ca3,axis=0)
+        mean = np.nanmean(ave_ca3, axis=0)
         std = np.nanstd(ave_ca3, axis=0)
         
         # plot the average and standard deviation as error lines
@@ -209,7 +213,7 @@ class ProcessCohort():
 
         plt.savefig(os.path.join(self.root_dir,
                                  'results',
-                                    'cohort_hit_rates.png'), dpi=200)
+                                    'cohort_hit_rates.svg'), dpi=200)
         
 
         # xticks=['early','late']
@@ -585,6 +589,8 @@ class ProcessCohort():
             # plot the ks test results as an addition to the legend
             plt.legend(title="ks test: "+str(round(res_ks[0],3))+
                         ", ks pval: "+str(round(res_ks[1],5)))
+
+
 
     #
     def cohort_rewards_per_minute(self):
@@ -1559,19 +1565,28 @@ class ProcessSession():
                              'data', 'results.npz')
         
         #
-        #print ("Loading data...")
+        print ("Loading data...")
         try:
             data = np.load(fname, allow_pickle=True)
         
             ################################################
             self.trials = data['trials']
-            self.ends_ttl = data['trials'][:, 2]
-            self.rewards = data['trials'][:, 4]
+            # find nans in 0th column idxes
+            idx = np.where(~np.isnan(self.trials[:, 0]))[0]
+
+            self.trial_starts = data['trials'][idx, 0]
+            self.ends_ttl = data['trials'][idx, 2]
+            self.rewards = data['trials'][idx, 4]
+            #print ('self.trials: ', self.trials[:10])
+            #print ('self.ends_ttl: ', self.ends_ttl[:10])
+            #print ('self.rewards: ', self.rewards[:10])
 
             #
-            times_of_trials = self.trials
+            times_of_trials = self.trial_starts
             idx = np.where(times_of_trials > self.session_duration)[0]
+            print ("self.session_duration: ", self.session_duration)
             self.trials = np.delete(self.trials, idx)
+            self.trial_starts = np.delete(self.trial_starts, idx)
             self.ends_ttl = np.delete(self.ends_ttl, idx)
             self.rewards = np.delete(self.rewards, idx)
 
@@ -1654,59 +1669,60 @@ class ProcessSession():
         ################## LOAD DICTIONARY ####################
         #######################################################
         if self.skip_dict:
-            #print ("Skipping dictionary")
-            return
-        fname_dict = os.path.join(self.root_dir,
-                                  self.animal_id,
+            print ("Skipping dictionary")
+
+        else:          
+            fname_dict = os.path.join(self.root_dir,
+                                    self.animal_id,
                                   self.session_id,
                                   'data', 'results.xlsx')
 
-        #
-        if os.path.exists(fname_dict):
-            # SEARCH FOR DICTIONARY:
-            df = pd.read_excel(fname_dict)
-            D = df.iloc[:, 1:].values
-
             #
-            self.white_noise = D[:, 2]
-            self.white_noise = self.white_noise[:self.session_duration]
-            self.high_threshold = D[:, 1]
-            self.high_threshold = self.high_threshold[:self.session_duration]
-            self.ttl_det = np.int32(D[:,0])-1
-            self.ttl_det = self.ttl_det[:self.session_duration]
-            post_reward = D[:, 3]
-
-            # this is for the rare case when the results.npz file is corrupt
-            if self.reward_times[0] == None:
-                # find column name in D that is "water_reward"
-                idx = np.where(df.columns == "water_reward")[0][0]
-                print ("water_reward loaded from xlsx column: ", idx)
-                self.reward_times = np.int32(D[:, idx-1])
-
-                # find where reward_times switches from 0 to 1
-                idx = np.where(np.diff(self.reward_times) == 1)[0]
-                self.reward_times = idx
-
-                # clip them to session duration
-                idx = np.where(self.reward_times > self.session_duration)[0]
-                self.reward_times = np.delete(self.reward_times, idx)
-
-                print ("reward times: ", self.reward_times)
-                self.rewards = self.reward_times.copy()
+            if os.path.exists(fname_dict):
+                # SEARCH FOR DICTIONARY:
+                df = pd.read_excel(fname_dict)
+                D = df.iloc[:, 1:].values
 
                 #
-                self.ttl_times = np.arange(self.session_duration)
+                self.white_noise = D[:, 2]
+                self.white_noise = self.white_noise[:self.session_duration]
+                self.high_threshold = D[:, 1]
+                self.high_threshold = self.high_threshold[:self.session_duration]
+                self.ttl_det = np.int32(D[:,0])-1
+                self.ttl_det = self.ttl_det[:self.session_duration]
+                post_reward = D[:, 3]
 
-        else:
-            if self.verbose:
-                print ("Missing dictionary (early sessions... skipping)")
+                # this is for the rare case when the results.npz file is corrupt
+                if self.reward_times[0] == None:
+                    # find column name in D that is "water_reward"
+                    idx = np.where(df.columns == "water_reward")[0][0]
+                    print ("water_reward loaded from xlsx column: ", idx)
+                    self.reward_times = np.int32(D[:, idx-1])
 
-        print ("    ... done loading data...")
+                    # find where reward_times switches from 0 to 1
+                    idx = np.where(np.diff(self.reward_times) == 1)[0]
+                    self.reward_times = idx
+
+                    # clip them to session duration
+                    idx = np.where(self.reward_times > self.session_duration)[0]
+                    self.reward_times = np.delete(self.reward_times, idx)
+
+                    print ("reward times: ", self.reward_times)
+                    self.rewards = self.reward_times.copy()
+
+                    #
+                    self.ttl_times = np.arange(self.session_duration)
+
+            else:
+                if self.verbose:
+                    print ("Missing dictionary (early sessions... skipping)")
+
+            print ("    ... done loading data...")
 
         #
         if self.verbose:
             try:
-                print("reward times: ", self.reward_times.shape)
+                print("reward times: ", self.reward_times)
                 print ("Recording length (mins): ", self.rec_len_mins)
                 print("abs times: ", self.abs_times.shape, self.abs_times)
                 print("ttl times: ", self.ttl_times.shape, self.ttl_times[0], self.ttl_times[-1], " total rec time sec: ",
@@ -2467,32 +2483,36 @@ class ProcessSession():
         #
         # make hits per min array
         xx = np.arange(0,self.rec_len_mins,self.bin_width_mins)
-        start_ttl = 0                                 # this isn't quite correct; but it make a big difference unless we have weird offsets; 
-                                                      #  for now we assume that ttl starts about same time as the recording
+        #start_ttl = 0                                 # this isn't quite correct; but it make a big difference unless we have weird offsets; 
+        #                                              #  for now we assume that ttl starts about same time as the recording
         hits_per_bin = np.zeros(xx.shape[0])
-        misses_per_bin = np.zeros(xx.shape[0])
+        #misses_per_bin = np.zeros(xx.shape[0])
         n_trials_per_bin = np.zeros(xx.shape[0])
     
-        for k in range(self.rewards.shape[0]):
-            temp = self.rewards[k]
-            abs_ttl_in_mins = (self.ends_ttl[k]-start_ttl)/self.sample_rate/60.      # here we compute the end of the trial in minutes
+        # reward times
+        temp_rewards_bins = np.int32(self.reward_times.copy()/self.sample_rate/60./self.bin_width_mins)
+        print ("temp_rewards in 5min chunks", temp_rewards_bins)
 
-            # check if we have reached nans - which indicate we are done with the trials
-            if np.isnan(abs_ttl_in_mins):
-                break
+        # trial times
+        temp_trials_bins = np.int32(self.trial_starts.copy()/self.sample_rate/60./self.bin_width_mins)
+        print ("temp_trials in 5min chunks", temp_trials_bins)
 
-            # convert the time to the bin index; and add it to the hits or misses array
-            idx = int(abs_ttl_in_mins/self.bin_width_mins)
-            if temp:
-                hits_per_bin[idx]+= 1
-            else:
-                misses_per_bin[idx]+= 1
+        # loop over temp_rewards_bins
+        for k in range(temp_rewards_bins.shape[0]):
+            hits_per_bin[temp_rewards_bins[k]]+=1
 
-            n_trials_per_bin[idx]+=1
+        # loop over temp_trials_bins
+        for k in range(temp_trials_bins.shape[0]):
+            n_trials_per_bin[temp_trials_bins[k]]+=1
+
+        #
+        print ("hits per bin: ", hits_per_bin)
+        print ("n_trials_per_bin: ", n_trials_per_bin)
 
         #
         yy = hits_per_bin/n_trials_per_bin
 
+        #
         from scipy import stats
         try:
             res = stats.pearsonr(xx,yy)
