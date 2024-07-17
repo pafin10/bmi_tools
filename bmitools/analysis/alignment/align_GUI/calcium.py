@@ -32,7 +32,7 @@ import sys
 module_path = os.path.abspath(os.path.join('..'))
 sys.path.append(module_path)
 from scipy.optimize import curve_fit
-from scipy import asarray as ar,exp
+from numpy import asarray as ar,exp
 #from utils.wheel import wheel
 
 
